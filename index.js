@@ -9,8 +9,9 @@ const app = express();
 app.use(bodyParser.json());
 
 // 🌐 Tokens
-const PAGE_ACCESS_TOKEN = process.env.PAGE_ACCESS_TOKEN;
 const VERIFY_TOKEN = process.env.VERIFY_TOKEN;
+const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN;
+const PHONE_NUMBER_ID = process.env.PHONE_NUMBER_ID;
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
 // 🔹 Inicializar cliente OpenAI
@@ -67,41 +68,27 @@ function reiniciarTimerInactividad(senderId) {
     }, 12 * 60 * 1000);
 }
 
+// Función para enviar aviso de inactividad al usuario por WhatsApp
 async function enviarAvisoInactividad(senderId) {
-    try {
-        await axios.post(`https://graph.facebook.com/v17.0/me/messages?access_token=${PAGE_ACCESS_TOKEN}`, {
-            recipient: { id: senderId },
-            message: {
-                attachment: {
-                    type: "template",
-                    payload: {
-                        template_type: "button",
-                        text: "¿Podemos ayudarte en algo más? 😊 También puedes continuar tu pedido por WhatsApp:",
-                        buttons: [
-                            { type: "web_url", url: "https://wa.me/51904805167", title: "📞 Continuar por WhatsApp" }
-                        ]
-                    }
-                }
-            }
-        });
-    } catch (error) {
-        console.error('❌ Error enviando aviso de inactividad:', error.response?.data || error.message);
-    }
+  try {
+    await axios.post(`https://graph.facebook.com/v18.0/${PHONE_NUMBER_ID}/messages`, {
+      messaging_product: 'whatsapp',
+      to: senderId,
+      text: {
+        body: "🤖 ¿Podemos ayudarte en algo más? También puedes continuar tu pedido por WhatsApp: https://wa.me/519048805167"
+      }
+    }, {
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${WHATSAPP_TOKEN}`
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Error enviando aviso de inactividad:', error.response?.data || error.message);
+  }
 }
 
-async function finalizarSesion(senderId) {
-    try {
-        delete estadoUsuario[senderId];
-        delete memoriaConversacion[senderId];
-
-        await axios.post(`https://graph.facebook.com/v17.0/me/messages?access_token=${PAGE_ACCESS_TOKEN}`, {
-            recipient: { id: senderId },
-            message: { text: "⏳ Tu sesión ha terminado. ¡Gracias por visitar Tiendas Megan!" }
-        });
-    } catch (error) {
-        console.error('❌ Error finalizando sesión:', error.response?.data || error.message);
-    }
-}
 app.post('/webhook', async (req, res) => {
   const body = req.body;
 
@@ -277,21 +264,21 @@ function manejarPostback(senderId, payload) {
 
 
 // 🔹 CONSULTAR CHATGPT CON MEMORIA (NUEVA LÓGICA DE TRIGGERS)
-async function enviarConsultaChatGPT(senderId, mensajeCliente) {
+async function enviarConsultaChatGPT(from, mensajeCliente) {
   try {
-    if (!memoriaConversacion[senderId]) memoriaConversacion[senderId] = [];
+    if (!memoriaConversacion[from]) memoriaConversacion[from] = [];
 
-    memoriaConversacion[senderId].push({ role: "user", content: mensajeCliente });
+    memoriaConversacion[from].push({ role: "user", content: mensajeCliente });
 
     // ✅ Sumamos interacción
-    if (!contadorMensajesAsesor[senderId]) contadorMensajesAsesor[senderId] = 0;
-    contadorMensajesAsesor[senderId]++;
+    if (!contadorMensajesAsesor[from]) contadorMensajesAsesor[from] = 0;
+    contadorMensajesAsesor[from]++;
 
     const contexto = [
       { role: "system", content: `${systemPrompt}
 
 Aquí tienes los datos del catálogo: ${JSON.stringify(data, null, 2)}` },
-      ...memoriaConversacion[senderId]
+      ...memoriaConversacion[from]
     ];
 
     const completion = await client.chat.completions.create({
@@ -300,7 +287,7 @@ Aquí tienes los datos del catálogo: ${JSON.stringify(data, null, 2)}` },
     });
 
     const respuesta = completion.choices[0].message.content.trim();
-    memoriaConversacion[senderId].push({ role: "assistant", content: respuesta });
+    memoriaConversacion[from].push({ role: "assistant", content: respuesta });
 
     // ✅ Detectar triggers de ChatGPT
     if (respuesta.startsWith("MOSTRAR_MODELO:")) {
@@ -308,129 +295,145 @@ Aquí tienes los datos del catálogo: ${JSON.stringify(data, null, 2)}` },
       const producto = Object.values(data).flat().find(p => p.codigo === codigo);
       
       if (producto) {
-        await enviarInfoPromo(senderId, producto); // 📸 Envía imagen + info
+        await enviarInfoPromo(from, producto); // 📸 Envía imagen + info
       } else {
-        await enviarMensajeTexto(senderId, "😔 Lo siento, no encontramos ese modelo en nuestra base de datos.");
+        await enviarMensajeTexto(from, "😔 Lo siento, no encontramos ese modelo en nuestra base de datos.");
       }
       return;
     }
 
     if (respuesta.startsWith("MOSTRAR_CATALOGO:")) {
       const categoria = respuesta.split(":")[1].trim();
-      await enviarCatalogo(senderId, categoria);
+      await enviarCatalogo(from, categoria);
       return;
     }
 
-    // ✅ Si GPT pide preguntar género para catálogo
     if (respuesta === "PEDIR_CATALOGO") {
-      await enviarMensajeTexto(senderId, "😊 Claro que sí. ¿El catálogo que desea ver es para caballeros o para damas?");
-      estadoUsuario[senderId] = "ESPERANDO_GENERO";
+      await enviarMensajeTexto(from, "😊 Claro que sí. ¿El catálogo que desea ver es para caballeros o para damas?");
+      estadoUsuario[from] = "ESPERANDO_GENERO";
       return;
     }
 
-    // ✅ Si GPT pide preguntar tipo (después de género)
     if (respuesta.startsWith("PREGUNTAR_TIPO:")) {
       const genero = respuesta.split(":")[1].trim();
-      estadoUsuario[senderId] = `ESPERANDO_TIPO_${genero.toUpperCase()}`;
-      await enviarSubmenuTipoReloj(senderId, genero.toUpperCase());
+      estadoUsuario[from] = `ESPERANDO_TIPO_${genero.toUpperCase()}`;
+      await enviarSubmenuTipoReloj(from, genero.toUpperCase());
       return;
     }
 
     // ✅ Si no hay trigger, enviamos la respuesta normal como antes
-    await enviarMensajeConBotonSalir(senderId, respuesta);
+    await enviarMensajeConBotonSalir(from, respuesta);
 
   } catch (error) {
     console.error('❌ Error en consulta a ChatGPT:', error);
-    await enviarMensajeTexto(senderId, "⚠️ Lo siento, hubo un problema al conectarme con el asesor. Intenta nuevamente en unos minutos.");
+    await enviarMensajeTexto(from, "⚠️ Lo siento, hubo un problema al conectarme con el asesor. Intenta nuevamente en unos minutos.");
   }
 }
 
 
-// 🔹 MANEJAR FLUJO DE COMPRA (igual que antes)
-async function manejarFlujoCompra(senderId, mensaje) {
+// 🔹 MANEJAR FLUJO DE COMPRA (adaptado a WhatsApp)
+async function manejarFlujoCompra(from, mensaje) {
   const tieneCelular = /\b9\d{8}\b/.test(mensaje);
   const tieneNombre = /^([A-ZÁÉÍÓÚÑ][a-záéíóúñ]+)(\s+[A-ZÁÉÍÓÚÑ]?[a-záéíóúñ]+){1,3}$/.test(mensaje);
   const tieneDireccion = /(jirón|jr\.|avenida|av\.|calle|pasaje|mz|mza|lote|urb\.|urbanización)/i.test(mensaje);
   const tieneDNI = /\b\d{8}\b/.test(mensaje);
 
-  if (estadoUsuario[senderId] === 'ESPERANDO_DATOS_PROVINCIA') {
-    if (!tieneNombre) return enviarMensajeTexto(senderId, "📌 Por favor envíe su nombre completo.");
-    if (!tieneDNI) return enviarMensajeTexto(senderId, "📌 Su DNI debe tener 8 dígitos. Por favor, envíelo correctamente.");
-    if (!tieneCelular) return enviarMensajeTexto(senderId, "📌 Su número de WhatsApp debe tener 9 dígitos y comenzar con 9.");
+  if (estadoUsuario[from] === 'ESPERANDO_DATOS_PROVINCIA') {
+    if (!tieneNombre) return enviarMensajeTexto(from, "📌 Por favor envíe su nombre completo.");
+    if (!tieneDNI) return enviarMensajeTexto(from, "📌 Su DNI debe tener 8 dígitos. Por favor, envíelo correctamente.");
+    if (!tieneCelular) return enviarMensajeTexto(from, "📌 Su número de WhatsApp debe tener 9 dígitos y comenzar con 9.");
 
-    await enviarMensajeTexto(senderId,
+    await enviarMensajeTexto(from,
       "✅ Su orden ha sido confirmada ✔\nEnvío de: 1 Reloj Premium\n" +
       "👉 Forma: Envío a recoger en Agencia Shalom\n" +
       "👉 Datos recibidos correctamente.\n");
 
-    await enviarMensajeTexto(senderId,
+    await enviarMensajeTexto(from,
       "😊 Estimado cliente, para enviar su pedido necesitamos un adelanto simbólico de 20 soles por motivo de seguridad.\n\n" +
       "📱 YAPE: 979 434 826 (Paulina Gonzales Ortega)\n" +
       "🏦 BCP: 19303208489096\n" +
       "🏦 CCI: 00219310320848909613\n\n" +
       "📤 Envíe la captura de su pago aquí para registrar su adelanto.");
-    provinciaPagosEnviados[senderId] = true;
-    delete estadoUsuario[senderId];
+
+    provinciaPagosEnviados[from] = true;
+    delete estadoUsuario[from];
     return;
   }
+}
 
-  if (estadoUsuario[senderId] === 'ESPERANDO_DATOS_LIMA') {
-    if (!tieneNombre) return enviarMensajeTexto(senderId, "📌 Por favor envíe su nombre completo.");
-    if (!tieneCelular) return enviarMensajeTexto(senderId, "📌 Su número de WhatsApp debe tener 9 dígitos y comenzar con 9.");
-    if (!tieneDireccion) return enviarMensajeTexto(senderId, "📌 Su dirección debe incluir calle, avenida, jirón o pasaje.");
+    if (estadoUsuario[from] === 'ESPERANDO_DATOS_LIMA') {
+    if (!tieneNombre) return enviarMensajeTexto(from, "📌 Por favor envíe su nombre completo.");
+    if (!tieneCelular) return enviarMensajeTexto(from, "📌 Su número de WhatsApp debe tener 9 dígitos y comenzar con 9.");
+    if (!tieneDireccion) return enviarMensajeTexto(from, "📌 Su dirección debe incluir calle, avenida, jirón o pasaje.");
 
-    await enviarMensajeTexto(senderId,
+    await enviarMensajeTexto(from,
       "✅ Su orden ha sido confirmada ✔\nEnvío de: 1 Reloj Premium\n" +
       "👉 Forma: Envío express a domicilio\n" +
       "👉 Datos recibidos correctamente.\n" +
       "💰 El costo incluye S/10 adicionales por envío a domicilio.");
 
-    delete estadoUsuario[senderId];
+    delete estadoUsuario[from];
     return;
   }
 
-  if (!avisoEnviado[senderId]) {
-    await enviarMensajeTexto(senderId,
+  if (!avisoEnviado[from]) {
+    await enviarMensajeTexto(from,
       "📌 Por favor, asegúrese de enviar sus datos correctos (nombre, WhatsApp, DNI/dirección y agencia Shalom).");
-    avisoEnviado[senderId] = true;
+    avisoEnviado[from] = true;
   }
-}
 
-// 🔹 ENVIAR MENSAJE TEXTO
-async function enviarMensajeTexto(senderId, text) {
+// 🔹 ENVIAR MENSAJE TEXTO (adaptado para WhatsApp)
+async function enviarMensajeTexto(to, text) {
   try {
-    await axios.post(`https://graph.facebook.com/v17.0/me/messages?access_token=${PAGE_ACCESS_TOKEN}`, {
-      recipient: { id: senderId },
-      message: { text }
+    await axios.post(`https://graph.facebook.com/v18.0/${phoneNumberId}/messages`, {
+      messaging_product: "whatsapp",
+      to,
+      text: { body: text }
+    }, {
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`
+      }
     });
   } catch (error) {
     console.error('❌ Error enviando mensaje:', error.response?.data || error.message);
   }
 }
 
-// 🔹 ENVIAR MENSAJE + BOTÓN (MODIFICADO)
-async function enviarMensajeConBotonSalir(senderId, text) {
+
+// 🔹 ENVIAR MENSAJE + BOTÓN (adaptado para WhatsApp)
+async function enviarMensajeConBotonSalir(to, text) {
   try {
     // ✅ Antes de 6 interacciones, solo enviamos el texto normal
-    if (!contadorMensajesAsesor[senderId] || contadorMensajesAsesor[senderId] < 6) {
-      await enviarMensajeTexto(senderId, text);
+    if (!contadorMensajesAsesor[to] || contadorMensajesAsesor[to] < 6) {
+      await enviarMensajeTexto(to, text);
       return;
     }
 
-    // ✅ Después de 6 interacciones, mostramos el botón “↩️ Volver al inicio”
-    await axios.post(`https://graph.facebook.com/v17.0/me/messages?access_token=${PAGE_ACCESS_TOKEN}`, {
-      recipient: { id: senderId },
-      message: {
-        attachment: {
-          type: "template",
-          payload: {
-            template_type: "button",
-            text: text,
-            buttons: [
-              { type: "postback", title: "↩️ Volver al inicio", payload: "SALIR_ASESOR" }
-            ]
-          }
+    // ✅ Después de 6 interacciones, enviamos un botón para volver al inicio
+    await axios.post(`https://graph.facebook.com/v18.0/${phoneNumberId}/messages`, {
+      messaging_product: "whatsapp",
+      to,
+      type: "interactive",
+      interactive: {
+        type: "button",
+        body: { text },
+        action: {
+          buttons: [
+            {
+              type: "reply",
+              reply: {
+                id: "SALIR_ASESOR",
+                title: "↩️ Volver al inicio"
+              }
+            }
+          ]
         }
+      }
+    }, {
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`
       }
     });
   } catch (error) {
@@ -438,49 +441,63 @@ async function enviarMensajeConBotonSalir(senderId, text) {
   }
 }
 
-// 🔹 ENVIAR INFO DE PROMO (con botones VERTICALES)
-async function enviarInfoPromo(senderId, producto) {
+
+// 🔹 ENVIAR INFO DE PROMO (adaptado a WhatsApp con imagen + botones)
+async function enviarInfoPromo(to, producto) {
   try {
     // 1️⃣ Enviar la imagen del producto
-    await axios.post(`https://graph.facebook.com/v17.0/me/messages?access_token=${PAGE_ACCESS_TOKEN}`, {
-      recipient: { id: senderId },
-      message: {
-        attachment: {
-          type: "image",
-          payload: { url: producto.imagen, is_reusable: true }
-        }
+    await axios.post(`https://graph.facebook.com/v18.0/${phoneNumberId}/messages`, {
+      messaging_product: "whatsapp",
+      to,
+      type: "image",
+      image: { link: producto.imagen }
+    }, {
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`
       }
     });
 
-    // 2️⃣ Enviar texto + botones en VERTICAL
-    await axios.post(`https://graph.facebook.com/v17.0/me/messages?access_token=${PAGE_ACCESS_TOKEN}`, {
-      recipient: { id: senderId },
-      message: {
-        attachment: {
-          type: "template",
-          payload: {
-            template_type: "button",
-            text: `${producto.nombre}\n${producto.descripcion}\n💰 Precio: S/${producto.precio}`,
-            buttons: [
-              {
-                type: "postback",
-                title: "🛍️ Comprar ahora",
-                payload: `COMPRAR_${producto.codigo}`
-              },
-              {
-                type: "web_url",
-url: "https://wa.me/51904805167?text=Hola%20quiero%20comprar%20este%20modelo",
-title: "📞 Comprar por WhatsApp"
-
-              },
-              {
-                type: "postback",
-                title: "📖 Ver otros modelos",
-                payload: "VER_MODELOS"
+    // 2️⃣ Enviar mensaje con botones
+    await axios.post(`https://graph.facebook.com/v18.0/${phoneNumberId}/messages`, {
+      messaging_product: "whatsapp",
+      to,
+      type: "interactive",
+      interactive: {
+        type: "button",
+        body: {
+          text: `${producto.nombre}\n${producto.descripcion}\n💰 Precio: S/${producto.precio}`
+        },
+        action: {
+          buttons: [
+            {
+              type: "reply",
+              reply: {
+                id: `COMPRAR_${producto.codigo}`,
+                title: "🛍️ Comprar ahora"
               }
-            ]
-          }
+            },
+            {
+              type: "reply",
+              reply: {
+                id: "VER_MODELOS",
+                title: "📖 Ver otros modelos"
+              }
+            },
+            {
+              type: "reply",
+              reply: {
+                id: "COMPRAR_WHATSAPP",
+                title: "📞 Comprar por WhatsApp"
+              }
+            }
+          ]
         }
+      }
+    }, {
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`
       }
     });
 
@@ -489,24 +506,48 @@ title: "📞 Comprar por WhatsApp"
   }
 }
 
-// 🔹 ENVIAR MENÚ PRINCIPAL (igual que antes)
-async function enviarMenuPrincipal(senderId) {
+// 🔹 ENVIAR MENÚ PRINCIPAL (adaptado a WhatsApp)
+async function enviarMenuPrincipal(to) {
   try {
-    await axios.post(`https://graph.facebook.com/v17.0/me/messages?access_token=${PAGE_ACCESS_TOKEN}`, {
-      recipient: { id: senderId },
-      message: {
-        attachment: {
-          type: "template",
-          payload: {
-            template_type: "button",
-            text: "👋 ¡Hola! Bienvenido a Tiendas Megan\n⌚💎 Descubre tu reloj ideal o el regalo perfecto 🎁\nElige una opción para ayudarte 👇",
-            buttons: [
-              { type: "postback", title: "⌚ Para Caballeros", payload: "CABALLEROS" },
-              { type: "postback", title: "🕒 Para Damas", payload: "DAMAS" },
-              { type: "postback", title: "💬 Hablar con Asesor", payload: "ASESOR" }
-            ]
-          }
+    await axios.post(`https://graph.facebook.com/v18.0/${phoneNumberId}/messages`, {
+      messaging_product: "whatsapp",
+      to,
+      type: "interactive",
+      interactive: {
+        type: "button",
+        body: {
+          text: "👋 ¡Hola! Bienvenido a Tiendas Megan\n⌚💎 Descubre tu reloj ideal o el regalo perfecto 🎁\nElige una opción para ayudarte 👇"
+        },
+        action: {
+          buttons: [
+            {
+              type: "reply",
+              reply: {
+                id: "CABALLEROS",
+                title: "⌚ Para Caballeros"
+              }
+            },
+            {
+              type: "reply",
+              reply: {
+                id: "DAMAS",
+                title: "🕒 Para Damas"
+              }
+            },
+            {
+              type: "reply",
+              reply: {
+                id: "ASESOR",
+                title: "💬 Hablar con Asesor"
+              }
+            }
+          ]
         }
+      }
+    }, {
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`
       }
     });
   } catch (error) {
@@ -514,8 +555,9 @@ async function enviarMenuPrincipal(senderId) {
   }
 }
 
-// 🔹 SUBMENÚ AUTOMÁTICOS / CUARZO (igual que antes)
-async function enviarSubmenuTipoReloj(senderId, genero) {
+
+// 🔹 SUBMENÚ AUTOMÁTICOS / CUARZO (adaptado a WhatsApp)
+async function enviarSubmenuTipoReloj(to, genero) {
   let texto = genero === "CABALLEROS" 
     ? "🔥 ¡Excelente elección! ¿Qué tipo de reloj para caballeros le interesa?"
     : "🔥 ¡Excelente elección! ¿Qué tipo de reloj para damas le interesa?";
@@ -524,20 +566,36 @@ async function enviarSubmenuTipoReloj(senderId, genero) {
   let payloadCuarzo = genero === "CABALLEROS" ? "CABALLEROS_CUARZO" : "DAMAS_CUARZO";
 
   try {
-    await axios.post(`https://graph.facebook.com/v17.0/me/messages?access_token=${PAGE_ACCESS_TOKEN}`, {
-      recipient: { id: senderId },
-      message: {
-        attachment: {
-          type: "template",
-          payload: {
-            template_type: "button",
-            text: texto,
-            buttons: [
-              { type: "postback", title: "⌚ Automáticos ⚙️", payload: payloadAuto },
-              { type: "postback", title: "🕑 De cuarzo ✨", payload: payloadCuarzo }
-            ]
-          }
+    await axios.post(`https://graph.facebook.com/v18.0/${phoneNumberId}/messages`, {
+      messaging_product: "whatsapp",
+      to,
+      type: "interactive",
+      interactive: {
+        type: "button",
+        body: { text: texto },
+        action: {
+          buttons: [
+            {
+              type: "reply",
+              reply: {
+                id: payloadAuto,
+                title: "⌚ Automáticos ⚙️"
+              }
+            },
+            {
+              type: "reply",
+              reply: {
+                id: payloadCuarzo,
+                title: "🕑 De cuarzo ✨"
+              }
+            }
+          ]
         }
+      }
+    }, {
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`
       }
     });
   } catch (error) {
@@ -545,39 +603,73 @@ async function enviarSubmenuTipoReloj(senderId, genero) {
   }
 }
 
-// 🔹 ENVIAR CATÁLOGO (igual que antes)
-async function enviarCatalogo(senderId, categoria) {
+
+// 🔹 ENVIAR CATÁLOGO (adaptado para WhatsApp)
+async function enviarCatalogo(to, categoria) {
   try {
     const listaProductos = data[categoria];
 
     if (!listaProductos || listaProductos.length === 0) {
-      enviarMensajeTexto(senderId, "❌ No tenemos productos en esta categoría por ahora.");
+      await enviarMensajeTexto(to, "❌ No tenemos productos en esta categoría por ahora.");
       return;
     }
 
     for (let producto of listaProductos) {
-      await axios.post(`https://graph.facebook.com/v17.0/me/messages?access_token=${PAGE_ACCESS_TOKEN}`, {
-        recipient: { id: senderId },
-        message: {
-          attachment: { type: "image", payload: { url: producto.imagen, is_reusable: true } }
+      // 1️⃣ Enviar imagen
+      await axios.post(`https://graph.facebook.com/v18.0/${phoneNumberId}/messages`, {
+        messaging_product: "whatsapp",
+        to,
+        type: "image",
+        image: {
+          link: producto.imagen
+        }
+      }, {
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
         }
       });
 
-      await axios.post(`https://graph.facebook.com/v17.0/me/messages?access_token=${PAGE_ACCESS_TOKEN}`, {
-        recipient: { id: senderId },
-        message: {
-          attachment: {
-            type: "template",
-            payload: {
-              template_type: "button",
-              text: `${producto.nombre}\n${producto.descripcion}\n💰 Precio: S/${producto.precio}`,
-              buttons: [
-                { type: "postback", title: "🛍️ Comprar ahora", payload: `COMPRAR_${producto.codigo}` },
-                { type: "web_url", url: "https://wa.me/51904805167?text=Hola%20quiero%20comprar%20este%20modelo", title: "📞 Comprar por WhatsApp" },
-                { type: "postback", title: "📖 Ver otros modelos", payload: "VER_MODELOS" }
-              ]
-            }
+      // 2️⃣ Enviar texto + botones
+      await axios.post(`https://graph.facebook.com/v18.0/${phoneNumberId}/messages`, {
+        messaging_product: "whatsapp",
+        to,
+        type: "interactive",
+        interactive: {
+          type: "button",
+          body: {
+            text: `${producto.nombre}\n${producto.descripcion}\n💰 Precio: S/${producto.precio}`
+          },
+          action: {
+            buttons: [
+              {
+                type: "reply",
+                reply: {
+                  id: `COMPRAR_${producto.codigo}`,
+                  title: "🛍️ Comprar ahora"
+                }
+              },
+              {
+                type: "reply",
+                reply: {
+                  id: "WHATSAPP_COMPRA",
+                  title: "📞 Comprar por WhatsApp"
+                }
+              },
+              {
+                type: "reply",
+                reply: {
+                  id: "VER_MODELOS",
+                  title: "📖 Ver otros modelos"
+                }
+              }
+            ]
           }
+        }
+      }, {
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
         }
       });
     }
@@ -586,17 +678,41 @@ async function enviarCatalogo(senderId, categoria) {
   }
 }
 
-// 🔹 PREGUNTAR LIMA O PROVINCIA (igual que antes)
-async function enviarPreguntaUbicacion(senderId) {
+// 🔹 PREGUNTAR LIMA O PROVINCIA (adaptado para WhatsApp)
+async function enviarPreguntaUbicacion(to) {
   try {
-    await axios.post(`https://graph.facebook.com/v17.0/me/messages?access_token=${PAGE_ACCESS_TOKEN}`, {
-      recipient: { id: senderId },
-      message: {
-        text: "😊 Por favor indíquenos, ¿su pedido es para Lima o para Provincia?",
-        quick_replies: [
-          { content_type: "text", title: "🏙 Lima", payload: "UBICACION_LIMA" },
-          { content_type: "text", title: "🏞 Provincia", payload: "UBICACION_PROVINCIA" }
-        ]
+    await axios.post(`https://graph.facebook.com/v18.0/${phoneNumberId}/messages`, {
+      messaging_product: "whatsapp",
+      to,
+      type: "interactive",
+      interactive: {
+        type: "button",
+        body: {
+          text: "😊 Por favor indíquenos, ¿su pedido es para Lima o para Provincia?"
+        },
+        action: {
+          buttons: [
+            {
+              type: "reply",
+              reply: {
+                id: "UBICACION_LIMA",
+                title: "🏙 Lima"
+              }
+            },
+            {
+              type: "reply",
+              reply: {
+                id: "UBICACION_PROVINCIA",
+                title: "🏞 Provincia"
+              }
+            }
+          ]
+        }
+      }
+    }, {
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`
       }
     });
   } catch (error) {
@@ -609,8 +725,9 @@ async function enviarPreguntaUbicacion(senderId) {
 // 🔥 FUNCIONES DE INACTIVIDAD 🔥
 function reiniciarTimerInactividad(senderId) {
   limpiarTimers(senderId);
+
   const timer10 = setTimeout(async () => {
-    await enviarBotonWhatsApp(senderId);
+    await enviarBotonWhatsApp(senderId); // ✅ Esta función debe estar adaptada para WhatsApp
   }, 10 * 60 * 1000);
 
   const timer12 = setTimeout(async () => {
@@ -631,28 +748,90 @@ function limpiarTimers(senderId) {
     delete timersInactividad[senderId];
   }
 }
-
-async function enviarBotonWhatsApp(senderId) {
+async function enviarBotonWhatsApp(to) {
   try {
-    await axios.post(`https://graph.facebook.com/v17.0/me/messages?access_token=${PAGE_ACCESS_TOKEN}`, {
-      recipient: { id: senderId },
-      message: {
-        attachment: {
-          type: "template",
-          payload: {
-            template_type: "button",
-            text: "¿Le gustaría que le ayudemos en algo más o desea continuar la conversación con un asesor por WhatsApp?",
-            buttons: [
-              { type: "web_url", url: "https://wa.me/51904805167", title: "📞 Continuar en WhatsApp" }
-            ]
-          }
+    await axios.post(`https://graph.facebook.com/v18.0/${phoneNumberId}/messages`, {
+      messaging_product: "whatsapp",
+      to,
+      type: "interactive",
+      interactive: {
+        type: "button",
+        body: {
+          text: "¿Deseas continuar con la atención o prefieres hablar por WhatsApp?"
+        },
+        action: {
+          buttons: [
+            {
+              type: "reply",
+              reply: {
+                id: "CONTINUAR",
+                title: "✅ Continuar aquí"
+              }
+            },
+            {
+              type: "reply",
+              reply: {
+                id: "HABLAR_WHATSAPP",
+                title: "📞 Hablar por WhatsApp"
+              }
+            }
+          ]
         }
+      }
+    }, {
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`
       }
     });
   } catch (error) {
-    console.error('❌ Error enviando botón WhatsApp:', error.response?.data || error.message);
+    console.error("❌ Error enviando botón WhatsApp:", error.response?.data || error.message);
   }
 }
+
+
+async function enviarBotonWhatsApp(to) {
+  try {
+    await axios.post(`https://graph.facebook.com/v18.0/${phoneNumberId}/messages`, {
+      messaging_product: "whatsapp",
+      to,
+      type: "interactive",
+      interactive: {
+        type: "button",
+        body: {
+          text: "¿Deseas continuar con la atención o prefieres hablar por WhatsApp?"
+        },
+        action: {
+          buttons: [
+            {
+              type: "reply",
+              reply: {
+                id: "CONTINUAR",
+                title: "✅ Continuar aquí"
+              }
+            },
+            {
+              type: "reply",
+              reply: {
+                id: "HABLAR_WHATSAPP",
+                title: "📞 Hablar por WhatsApp"
+              }
+            }
+          ]
+        }
+      }
+    }, {
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`
+      }
+    });
+  } catch (error) {
+    console.error("❌ Error enviando botón WhatsApp:", error.response?.data || error.message);
+  }
+}
+
 // 🔥 FIN FUNCIONES DE INACTIVIDAD 🔥
 
 app.listen(3000, () => console.log('🚀 Servidor corriendo en http://localhost:3000'));
+
