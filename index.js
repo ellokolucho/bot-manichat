@@ -6,7 +6,7 @@ require('dotenv').config();
 const app = express();
 app.use(bodyParser.json());
 
-// Ruta de prueba
+// Ruta principal para comprobar si el bot está activo
 app.get('/', (req, res) => {
   res.send('Bot WhatsApp funcionando ✅');
 });
@@ -28,44 +28,50 @@ app.get('/webhook', (req, res) => {
   }
 });
 
-// Webhook POST: recibir mensajes y responder si dicen "hola"
+// Webhook para recibir mensajes de WhatsApp
 app.post('/webhook', async (req, res) => {
+  // 🔍 Log completo del cuerpo recibido
+  console.log('📩 Webhook recibido:', JSON.stringify(req.body, null, 2));
+
   const body = req.body;
   const mensaje = body?.entry?.[0]?.changes?.[0]?.value?.messages?.[0];
   const phoneNumberId = body?.entry?.[0]?.changes?.[0]?.value?.metadata?.phone_number_id;
 
   if (mensaje && mensaje.text && phoneNumberId) {
     const texto = mensaje.text.body.toLowerCase();
-    const from = mensaje.from; // Número del usuario
+    const from = mensaje.from;
 
     if (texto === 'hola') {
       console.log('✅ Recibido: hola');
 
-      // Responder mensaje usando API de Meta
-      await axios({
-        method: 'POST',
-        url: `https://graph.facebook.com/v18.0/${phoneNumberId}/messages`,
-        headers: {
-          'Authorization': `Bearer ${process.env.TOKEN}`,
-          'Content-Type': 'application/json'
-        },
-        data: {
-          messaging_product: 'whatsapp',
-          to: from,
-          text: {
-            body: 'Hola, ¿cómo estás? Estoy para ayudarte. 🙌'
+      try {
+        await axios({
+          method: 'POST',
+          url: `https://graph.facebook.com/v18.0/${phoneNumberId}/messages`,
+          headers: {
+            'Authorization': `Bearer ${process.env.TOKEN}`,
+            'Content-Type': 'application/json'
+          },
+          data: {
+            messaging_product: 'whatsapp',
+            to: from,
+            text: {
+              body: 'Hola, ¿cómo estás? Estoy para ayudarte. 🙌'
+            }
           }
-        }
-      }).catch(err => {
+        });
+
+        console.log('📤 Mensaje enviado exitosamente.');
+      } catch (err) {
         console.error('❌ Error al enviar mensaje:', err.response?.data || err.message);
-      });
+      }
     }
   }
 
   res.sendStatus(200);
 });
 
-// Escuchar en Railway
+// 🔥 Escuchar en el puerto que asigna Railway
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`Servidor escuchando en http://localhost:${PORT}`);
