@@ -6,12 +6,12 @@ require('dotenv').config();
 const app = express();
 app.use(bodyParser.json());
 
-// Ruta principal para comprobar si el bot está activo
+// Ruta principal
 app.get('/', (req, res) => {
   res.send('Bot WhatsApp funcionando ✅');
 });
 
-// Verificación del webhook de Meta
+// Verificación del webhook
 app.get('/webhook', (req, res) => {
   const VERIFY_TOKEN = process.env.VERIFY_TOKEN;
   const mode = req.query['hub.mode'];
@@ -28,50 +28,49 @@ app.get('/webhook', (req, res) => {
   }
 });
 
-// Webhook para recibir mensajes de WhatsApp
+// Webhook POST
 app.post('/webhook', async (req, res) => {
-  // 🔍 Log completo del cuerpo recibido
-  console.log('📩 Webhook recibido:', JSON.stringify(req.body, null, 2));
+  // 🟡 Log de todo lo recibido
+  console.log('📩 Recibido en POST /webhook:', JSON.stringify(req.body, null, 2));
 
-  const body = req.body;
-  const mensaje = body?.entry?.[0]?.changes?.[0]?.value?.messages?.[0];
-  const phoneNumberId = body?.entry?.[0]?.changes?.[0]?.value?.metadata?.phone_number_id;
+  try {
+    const body = req.body;
+    const mensaje = body?.entry?.[0]?.changes?.[0]?.value?.messages?.[0];
+    const phoneNumberId = body?.entry?.[0]?.changes?.[0]?.value?.metadata?.phone_number_id;
 
-  if (mensaje && mensaje.text && phoneNumberId) {
-    const texto = mensaje.text.body.toLowerCase();
-    const from = mensaje.from;
+    if (mensaje && mensaje.text && phoneNumberId) {
+      const texto = mensaje.text.body.toLowerCase();
+      const from = mensaje.from;
 
-    if (texto === 'hola') {
-      console.log('✅ Recibido: hola');
+      if (texto === 'hola') {
+        console.log('✅ Detectado "hola"');
 
-      try {
-        await axios({
-          method: 'POST',
-          url: `https://graph.facebook.com/v18.0/${phoneNumberId}/messages`,
-          headers: {
-            'Authorization': `Bearer ${process.env.TOKEN}`,
-            'Content-Type': 'application/json'
-          },
-          data: {
+        await axios.post(
+          `https://graph.facebook.com/v18.0/${phoneNumberId}/messages`,
+          {
             messaging_product: 'whatsapp',
             to: from,
-            text: {
-              body: 'Hola, ¿cómo estás? Estoy para ayudarte. 🙌'
+            text: { body: 'Hola, ¿cómo estás? Estoy para ayudarte. 🙌' }
+          },
+          {
+            headers: {
+              Authorization: `Bearer ${process.env.TOKEN}`,
+              'Content-Type': 'application/json'
             }
           }
-        });
+        );
 
-        console.log('📤 Mensaje enviado exitosamente.');
-      } catch (err) {
-        console.error('❌ Error al enviar mensaje:', err.response?.data || err.message);
+        console.log('📤 Respuesta enviada');
       }
     }
+  } catch (error) {
+    console.error('❌ Error general en /webhook:', error.response?.data || error.message);
   }
 
   res.sendStatus(200);
 });
 
-// 🔥 Escuchar en el puerto que asigna Railway
+// Puerto
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`Servidor escuchando en http://localhost:${PORT}`);
