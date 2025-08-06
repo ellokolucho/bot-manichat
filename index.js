@@ -92,119 +92,83 @@ async function enviarAvisoInactividad(senderId) {
 app.post('/webhook', async (req, res) => {
   const body = req.body;
 
-  if (body.object === 'page') {
-    body.entry.forEach(async (entry) => {
-      const webhookEvent = entry.messaging[0];
-      const senderId = webhookEvent.sender.id;
+  if (body.object === 'whatsapp_business_account') {
+    const entry = body.entry?.[0];
+    const changes = entry?.changes?.[0];
+    const value = changes?.value;
+    const message = value?.messages?.[0];
+    const from = message?.from;
 
-      // ✅ QUICK REPLY
-      if (webhookEvent.message && webhookEvent.message.quick_reply) {
-        const payload = webhookEvent.message.quick_reply.payload;
+    if (!message || !from) return res.sendStatus(200);
 
-        if (payload.startsWith('COMPRAR_')) {
-          enviarPreguntaUbicacion(senderId);
-          return;
-        }
+    const mensaje = message.text?.body?.trim().toLowerCase() || '';
 
-        if (payload === 'UBICACION_LIMA') {
-          estadoUsuario[senderId] = 'ESPERANDO_DATOS_LIMA';
-          avisoEnviado[senderId] = false;
-          okEnviado[senderId] = false;
-          enviarMensajeTexto(senderId,
-            "😊 Claro que sí. Por favor, para enviar su pedido indíquenos los siguientes datos:\n\n" +
-            "✅ Nombre completo ✍️\n" +
-            "✅ Número de WhatsApp 📱\n" +
-            "✅ Dirección exacta 📍\n" +
-            "✅ Una referencia de cómo llegar a su domicilio 🏠");
-          return;
-        }
+    reiniciarTimerInactividad(from); // 🔄 Reiniciamos el temporizador
 
-        if (payload === 'UBICACION_PROVINCIA') {
-          estadoUsuario[senderId] = 'ESPERANDO_DATOS_PROVINCIA';
-          avisoEnviado[senderId] = false;
-          okEnviado[senderId] = false;
-          provinciaPagosEnviados[senderId] = false;
-          enviarMensajeTexto(senderId,
-            "😊 Claro que sí. Por favor, permítanos los siguientes datos para programar su pedido:\n\n" +
-            "✅ Nombre completo ✍️\n" +
-            "✅ DNI 🪪\n" +
-            "✅ Número de WhatsApp 📱\n" +
-            "✅ Agencia Shalom que le queda más cerca 🚚");
-          return;
-        }
+    // 🧠 MODO ASESOR (con ChatGPT)
+    if (estadoUsuario[from] === 'ASESOR') {
+      if (mensaje === 'salir') {
+        delete estadoUsuario[from];
+        delete memoriaConversacion[from];
+        delete contadorMensajesAsesor[from];
+        await enviarMensajeTexto(from, "🚪 Has salido del chat con asesor. Volviendo al menú principal...");
+        enviarMenuPrincipal(from);
+        return res.sendStatus(200);
       }
 
-// ✅ MENSAJE DE TEXTO NORMAL (LÓGICA CORREGIDA)
-if (webhookEvent.message && webhookEvent.message.text) {
-  reiniciarTimerInactividad(senderId); // 🆕 Reiniciamos timers de inactividad
-  const mensaje = webhookEvent.message.text.trim().toLowerCase();
-
-  // 🎯 Si el usuario está en modo asesor, enviamos la consulta a ChatGPT
-  if (estadoUsuario[senderId] === 'ASESOR') {
-    if (mensaje === 'salir') {
-      delete estadoUsuario[senderId];
-      delete memoriaConversacion[senderId];
-      delete contadorMensajesAsesor[senderId]; // ✅ Limpiamos el contador
-      enviarMensajeTexto(senderId, "🚪 Has salido del chat con asesor. Volviendo al menú principal...");
-      enviarMenuPrincipal(senderId);
-      return;
+      await enviarConsultaChatGPT(from, mensaje);
+      return res.sendStatus(200);
     }
 
-    await enviarConsultaChatGPT(senderId, mensaje);
-    return;
+    // 🟢 RESPUESTA A “GRACIAS”
+    if (/^(gracias|muchas gracias|mil gracias|gracias!|gracias :\))$/i.test(mensaje)) {
+      await enviarMensajeTexto(from, "😄 ¡Gracias a usted! Estamos para servirle.");
+      return res.sendStatus(200);
+    }
+
+    // 📦 FLUJOS DE COMPRA
+    if (estadoUsuario[from] === 'ESPERANDO_DATOS_LIMA') {
+      manejarFlujoCompra(from, mensaje);
+      return res.sendStatus(200);
+    }
+
+    if (estadoUsuario[from] === 'ESPERANDO_DATOS_PROVINCIA') {
+      manejarFlujoCompra(from, mensaje);
+      return res.sendStatus(200);
+    }
+
+    // 💬 DISPARADORES DE INFO
+    if (mensaje.includes('me interesa este reloj exclusivo')) {
+      enviarInfoPromo(from, promoData.reloj1);
+      return res.sendStatus(200);
+    }
+
+    if (mensaje.includes('me interesa este reloj de lujo')) {
+      enviarInfoPromo(from, promoData.reloj2);
+      return res.sendStatus(200);
+    }
+
+    if (mensaje.includes('ver otros modelos')) {
+      enviarMenuPrincipal(from);
+      return res.sendStatus(200);
+    }
+
+    if (mensaje.includes('hola')) {
+      enviarMenuPrincipal(from);
+      return res.sendStatus(200);
+    }
+
+    // 🧠 GPT si no hay triggers
+    if (primerMensaje[from]) {
+      await enviarConsultaChatGPT(from, mensaje);
+    } else {
+      primerMensaje[from] = true;
+    }
+
+    return res.sendStatus(200);
   }
 
-  // ✅ RESPUESTA A “GRACIAS”
-  if (/^(gracias|muchas gracias|mil gracias|gracias!|gracias :\))$/i.test(mensaje)) {
-    enviarMensajeTexto(senderId, "😄 ¡Gracias a usted! Estamos para servirle.");
-    return;
-  }
-
-  // 🎯 FLUJOS DE COMPRA
-  if (estadoUsuario[senderId] === 'ESPERANDO_DATOS_LIMA' || estadoUsuario[senderId] === 'ESPERANDO_DATOS_PROVINCIA') {
-    manejarFlujoCompra(senderId, mensaje);
-    return;
-  }
-
-  // 🎯 DISPARADORES DE INFO
-  if (mensaje.includes('me interesa este reloj exclusivo')) {
-    enviarInfoPromo(senderId, promoData.reloj1);
-    return;
-  }
-  if (mensaje.includes('me interesa este reloj de lujo')) {
-    enviarInfoPromo(senderId, promoData.reloj2);
-    return;
-  }
-
-  if (mensaje.includes('ver otros modelos')) {
-    enviarMenuPrincipal(senderId);
-    return;
-  }
-
-  if (mensaje.includes('hola')) {
-    enviarMenuPrincipal(senderId);
-    return;
-  }
-
-  // ✅ Si no hay ningún trigger, ChatGPT responde (segunda interacción en adelante)
-  if (primerMensaje[senderId]) {
-    await enviarConsultaChatGPT(senderId, mensaje);
-    return;
-  } else {
-    primerMensaje[senderId] = true; // Marcamos la primera interacción
-  }
-}
-
-      // ✅ POSTBACKS}
-      if (webhookEvent.postback) {
-        manejarPostback(senderId, webhookEvent.postback.payload);
-      }
-    });
-
-    res.status(200).send('EVENT_RECEIVED');
-  } else {
-    res.sendStatus(404);
-  }
+  res.sendStatus(404);
 });
 
 // 🔹 MANEJAR POSTBACKS
