@@ -1,83 +1,70 @@
-const express = require("express");
-const bodyParser = require("body-parser");
-const app = express();
-require("dotenv").config();
+const express = require('express');
+const bodyParser = require('body-parser');
+const axios = require('axios');
+require('dotenv').config();
 
+const app = express();
 app.use(bodyParser.json());
 
-const VERIFY_TOKEN = process.env.VERIFY_TOKEN || "botwhatsapp2025";
+const token = process.env.WHATSAPP_TOKEN;
+const phoneNumberId = process.env.PHONE_NUMBER_ID;
 
-// Verificación del webhook
-app.get("/webhook", (req, res) => {
-  const mode = req.query["hub.mode"];
-  const token = req.query["hub.verify_token"];
-  const challenge = req.query["hub.challenge"];
+// Endpoint para verificar el webhook (usado por Meta)
+app.get('/webhook', (req, res) => {
+  const verifyToken = 'botwhatsapp2025'; // El mismo que colocaste en Meta
+  const mode = req.query['hub.mode'];
+  const tokenFromMeta = req.query['hub.verify_token'];
+  const challenge = req.query['hub.challenge'];
 
-  if (mode === "subscribe" && token === VERIFY_TOKEN) {
-    console.log("✅ Webhook verificado correctamente.");
+  if (mode && tokenFromMeta === verifyToken) {
     res.status(200).send(challenge);
   } else {
-    console.log("❌ Verificación del webhook fallida.");
     res.sendStatus(403);
   }
 });
 
-// Recepción de mensajes de WhatsApp
-app.post("/webhook", (req, res) => {
-  console.log("📩 Recibido en POST /webhook:", JSON.stringify(req.body, null, 2));
+// Endpoint para recibir mensajes
+app.post('/webhook', async (req, res) => {
+  console.log('📩 Webhook recibido:', JSON.stringify(req.body, null, 2));
 
   const body = req.body;
 
-  if (body.object === "whatsapp_business_account") {
-    const entry = body.entry?.[0];
-    const changes = entry?.changes?.[0];
-    const value = changes?.value;
-    const messages = value?.messages;
+  if (
+    body.object &&
+    body.entry &&
+    body.entry[0].changes &&
+    body.entry[0].changes[0].value.messages &&
+    body.entry[0].changes[0].value.messages[0]
+  ) {
+    const message = body.entry[0].changes[0].value.messages[0];
+    const from = message.from; // Número del usuario
+    const text = message.text?.body;
 
-    if (messages && messages.length > 0) {
-      const message = messages[0];
-      const from = message.from;
-      const text = message.text?.body;
+    console.log(`📨 Mensaje recibido de ${from}: ${text}`);
 
-      console.log("📨 Mensaje recibido:", text);
-
-      if (text && text.toLowerCase().includes("hola")) {
-        // Enviar respuesta
-        const axios = require("axios");
-        const token = process.env.WHATSAPP_TOKEN; // Asegúrate de tener esto en tu archivo .env
-
-        axios({
-          method: "POST",
-          url: `https://graph.facebook.com/v18.0/${value.metadata.phone_number_id}/messages`,
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-          },
-          data: {
-            messaging_product: "whatsapp",
-            to: from,
-            text: {
-              body: "Hola, ¿cómo estás? Estoy para ayudarte. 🤖",
-            },
-          },
-        })
-          .then((response) => {
-            console.log("✅ Respuesta enviada correctamente:", response.data);
-          })
-          .catch((error) => {
-            console.error("❌ Error al enviar el mensaje:", error.response?.data || error.message);
-          });
-      }
+    if (text && text.toLowerCase().includes("hola")) {
+      await axios({
+        method: 'POST',
+        url: `https://graph.facebook.com/v18.0/${phoneNumberId}/messages`,
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        data: {
+          messaging_product: 'whatsapp',
+          to: from,
+          text: {
+            body: 'Hola, ¿cómo estás? Estoy para ayudarte 😊'
+          }
+        }
+      });
     }
-
-    res.sendStatus(200);
-  } else {
-    res.sendStatus(404);
   }
+
+  res.sendStatus(200);
 });
 
-// Puerto corregido para Railway
-const PORT = process.env.PORT || 8080;
+const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`🚀 Servidor escuchando en http://0.0.0.0:${PORT}`);
 });
