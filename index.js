@@ -1,73 +1,72 @@
-const express = require('express');
-const bodyParser = require('body-parser');
-const axios = require('axios');
-require('dotenv').config();
-
+const express = require("express");
+const bodyParser = require("body-parser");
 const app = express();
-const PORT = process.env.PORT || 3000;
+require("dotenv").config();
 
 app.use(bodyParser.json());
 
-app.get('/', (req, res) => {
-  res.send('Bot de WhatsApp funcionando');
-});
+const VERIFY_TOKEN = process.env.VERIFY_TOKEN || "botwhatsapp2025";
 
-// Webhook de verificación (GET)
-app.get('/webhook', (req, res) => {
-  const VERIFY_TOKEN = process.env.VERIFY_TOKEN;
-  const mode = req.query['hub.mode'];
-  const token = req.query['hub.verify_token'];
-  const challenge = req.query['hub.challenge'];
+// Verificación del webhook
+app.get("/webhook", (req, res) => {
+  const mode = req.query["hub.mode"];
+  const token = req.query["hub.verify_token"];
+  const challenge = req.query["hub.challenge"];
 
-  if (mode && token) {
-    if (mode === 'subscribe' && token === VERIFY_TOKEN) {
-      console.log('🟢 Verificación exitosa del webhook');
-      res.status(200).send(challenge);
-    } else {
-      res.sendStatus(403);
-    }
+  if (mode === "subscribe" && token === VERIFY_TOKEN) {
+    console.log("✅ Webhook verificado correctamente.");
+    res.status(200).send(challenge);
+  } else {
+    console.log("❌ Verificación del webhook fallida.");
+    res.sendStatus(403);
   }
 });
 
-// Webhook receptor (POST)
-app.post('/webhook', async (req, res) => {
-  console.log('📩 Recibido en POST /webhook:', JSON.stringify(req.body, null, 2));
+// Recepción de mensajes de WhatsApp
+app.post("/webhook", (req, res) => {
+  console.log("📩 Recibido en POST /webhook:", JSON.stringify(req.body, null, 2));
 
   const body = req.body;
 
-  if (body.object) {
+  if (body.object === "whatsapp_business_account") {
     const entry = body.entry?.[0];
     const changes = entry?.changes?.[0];
     const value = changes?.value;
-    const message = value?.messages?.[0];
-    const phone_number_id = value?.metadata?.phone_number_id;
-    const from = message?.from;
-    const msg_body = message?.text?.body;
+    const messages = value?.messages;
 
-    if (msg_body && from && phone_number_id) {
-      console.log(`✉️ Mensaje recibido: ${msg_body} de ${from}`);
+    if (messages && messages.length > 0) {
+      const message = messages[0];
+      const from = message.from;
+      const text = message.text?.body;
 
-      // Aquí respondemos al mensaje recibido
-      try {
-        await axios({
-          method: 'POST',
-          url: `https://graph.facebook.com/v18.0/${phone_number_id}/messages`,
+      console.log("📨 Mensaje recibido:", text);
+
+      if (text && text.toLowerCase().includes("hola")) {
+        // Enviar respuesta
+        const axios = require("axios");
+        const token = process.env.WHATSAPP_TOKEN; // Asegúrate de tener esto en tu archivo .env
+
+        axios({
+          method: "POST",
+          url: `https://graph.facebook.com/v18.0/${value.metadata.phone_number_id}/messages`,
           headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${process.env.WHATSAPP_TOKEN}`,
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
           },
           data: {
-            messaging_product: 'whatsapp',
+            messaging_product: "whatsapp",
             to: from,
             text: {
-              body: 'Hola, ¿cómo estás? Estoy para ayudarte.',
+              body: "Hola, ¿cómo estás? Estoy para ayudarte. 🤖",
             },
           },
-        });
-
-        console.log('✅ Respuesta enviada correctamente');
-      } catch (error) {
-        console.error('❌ Error al enviar respuesta:', error.response?.data || error.message);
+        })
+          .then((response) => {
+            console.log("✅ Respuesta enviada correctamente:", response.data);
+          })
+          .catch((error) => {
+            console.error("❌ Error al enviar el mensaje:", error.response?.data || error.message);
+          });
       }
     }
 
@@ -77,6 +76,8 @@ app.post('/webhook', async (req, res) => {
   }
 });
 
+// Puerto corregido para Railway
+const PORT = process.env.PORT || 8080;
 app.listen(PORT, () => {
-  console.log(`🚀 Servidor escuchando en http://localhost:${PORT}`);
+  console.log(`🚀 Servidor escuchando en http://0.0.0.0:${PORT}`);
 });
