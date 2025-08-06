@@ -10,6 +10,24 @@ app.get('/', (req, res) => {
   res.send('Bot WhatsApp funcionando ✅');
 });
 
+// ✅ Ruta GET para verificar el webhook con Meta
+app.get('/webhook', (req, res) => {
+  const VERIFY_TOKEN = process.env.VERIFY_TOKEN;
+
+  const mode = req.query['hub.mode'];
+  const token = req.query['hub.verify_token'];
+  const challenge = req.query['hub.challenge'];
+
+  if (mode && token) {
+    if (mode === 'subscribe' && token === VERIFY_TOKEN) {
+      console.log('✅ WEBHOOK_VERIFICADO');
+      res.status(200).send(challenge);
+    } else {
+      res.sendStatus(403);
+    }
+  }
+});
+
 // Webhook para recibir mensajes de WhatsApp
 app.post('/webhook', (req, res) => {
   const body = req.body;
