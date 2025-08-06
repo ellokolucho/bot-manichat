@@ -96,79 +96,75 @@ app.post('/webhook', async (req, res) => {
     const entry = body.entry?.[0];
     const changes = entry?.changes?.[0];
     const value = changes?.value;
-    const message = value?.messages?.[0];
-    const from = message?.from;
+    const messages = value?.messages;
 
-    if (!message || !from) return res.sendStatus(200);
+    if (!messages) return res.sendStatus(200);
 
-    const mensaje = message.text?.body?.trim().toLowerCase() || '';
+    const message = messages[0];
+    const senderId = message.from;
+    const mensajeTexto = message.text?.body?.trim().toLowerCase();
 
-    reiniciarTimerInactividad(from); // 🔄 Reiniciamos el temporizador
+    reiniciarTimerInactividad(senderId); // Reinicia inactividad
 
-    // 🧠 MODO ASESOR (con ChatGPT)
-    if (estadoUsuario[from] === 'ASESOR') {
-      if (mensaje === 'salir') {
-        delete estadoUsuario[from];
-        delete memoriaConversacion[from];
-        delete contadorMensajesAsesor[from];
-        await enviarMensajeTexto(from, "🚪 Has salido del chat con asesor. Volviendo al menú principal...");
-        enviarMenuPrincipal(from);
+    // ✅ FLUJOS DE COMPRA
+    if (estadoUsuario[senderId] === 'ESPERANDO_DATOS_LIMA' || estadoUsuario[senderId] === 'ESPERANDO_DATOS_PROVINCIA') {
+      await manejarFlujoCompra(senderId, mensajeTexto);
+      return res.sendStatus(200);
+    }
+
+    // ✅ RESPUESTA A “GRACIAS”
+    if (/^(gracias|muchas gracias|mil gracias|gracias!|gracias :\))$/i.test(mensajeTexto)) {
+      await enviarMensajeTexto(senderId, "😄 ¡Gracias a usted! Estamos para servirle.");
+      return res.sendStatus(200);
+    }
+
+    // ✅ MODO ASESOR CON GPT
+    if (estadoUsuario[senderId] === 'ASESOR') {
+      if (mensajeTexto === 'salir') {
+        delete estadoUsuario[senderId];
+        delete memoriaConversacion[senderId];
+        delete contadorMensajesAsesor[senderId];
+        await enviarMensajeTexto(senderId, "🚪 Has salido del chat con asesor. Volviendo al menú principal...");
+        await enviarMenuPrincipal(senderId);
         return res.sendStatus(200);
       }
 
-      await enviarConsultaChatGPT(from, mensaje);
+      await enviarConsultaChatGPT(senderId, mensajeTexto);
       return res.sendStatus(200);
     }
 
-    // 🟢 RESPUESTA A “GRACIAS”
-    if (/^(gracias|muchas gracias|mil gracias|gracias!|gracias :\))$/i.test(mensaje)) {
-      await enviarMensajeTexto(from, "😄 ¡Gracias a usted! Estamos para servirle.");
+    // ✅ DISPARADORES PERSONALIZADOS
+    if (mensajeTexto.includes("me interesa este reloj exclusivo")) {
+      await enviarInfoPromo(senderId, promoData.reloj1);
       return res.sendStatus(200);
     }
 
-    // 📦 FLUJOS DE COMPRA
-    if (estadoUsuario[from] === 'ESPERANDO_DATOS_LIMA') {
-      manejarFlujoCompra(from, mensaje);
+    if (mensajeTexto.includes("me interesa este reloj de lujo")) {
+      await enviarInfoPromo(senderId, promoData.reloj2);
       return res.sendStatus(200);
     }
 
-    if (estadoUsuario[from] === 'ESPERANDO_DATOS_PROVINCIA') {
-      manejarFlujoCompra(from, mensaje);
+    if (mensajeTexto.includes("ver otros modelos")) {
+      await enviarMenuPrincipal(senderId);
       return res.sendStatus(200);
     }
 
-    // 💬 DISPARADORES DE INFO
-    if (mensaje.includes('me interesa este reloj exclusivo')) {
-      enviarInfoPromo(from, promoData.reloj1);
+    if (mensajeTexto.includes("hola")) {
+      await enviarMenuPrincipal(senderId);
       return res.sendStatus(200);
     }
 
-    if (mensaje.includes('me interesa este reloj de lujo')) {
-      enviarInfoPromo(from, promoData.reloj2);
-      return res.sendStatus(200);
-    }
-
-    if (mensaje.includes('ver otros modelos')) {
-      enviarMenuPrincipal(from);
-      return res.sendStatus(200);
-    }
-
-    if (mensaje.includes('hola')) {
-      enviarMenuPrincipal(from);
-      return res.sendStatus(200);
-    }
-
-    // 🧠 GPT si no hay triggers
-    if (primerMensaje[from]) {
-      await enviarConsultaChatGPT(from, mensaje);
+    // ✅ RESPUESTA GPT SI NO HAY TRIGGER Y YA HUBO UN PRIMER MENSAJE
+    if (primerMensaje[senderId]) {
+      await enviarConsultaChatGPT(senderId, mensajeTexto);
     } else {
-      primerMensaje[from] = true;
+      primerMensaje[senderId] = true;
     }
 
     return res.sendStatus(200);
+  } else {
+    res.sendStatus(404);
   }
-
-  res.sendStatus(404);
 });
 
 // 🔹 MANEJAR POSTBACKS
