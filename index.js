@@ -361,26 +361,26 @@ async function manejarFlujoCompra(from, mensaje) {
   }
 }
 
-    if (estadoUsuario[from] === 'ESPERANDO_DATOS_LIMA') {
-    if (!tieneNombre) return enviarMensajeTexto(from, "📌 Por favor envíe su nombre completo.");
-    if (!tieneCelular) return enviarMensajeTexto(from, "📌 Su número de WhatsApp debe tener 9 dígitos y comenzar con 9.");
-    if (!tieneDireccion) return enviarMensajeTexto(from, "📌 Su dirección debe incluir calle, avenida, jirón o pasaje.");
+if (estadoUsuario[senderId] === 'ESPERANDO_DATOS_LIMA') {
+  if (!tieneNombre) return enviarMensajeTexto(senderId, "📌 Por favor envíe su nombre completo.");
+  if (!tieneCelular) return enviarMensajeTexto(senderId, "📌 Su número de WhatsApp debe tener 9 dígitos y comenzar con 9.");
+  if (!tieneDireccion) return enviarMensajeTexto(senderId, "📌 Su dirección debe incluir calle, avenida, jirón o pasaje.");
 
-    await enviarMensajeTexto(from,
-      "✅ Su orden ha sido confirmada ✔\nEnvío de: 1 Reloj Premium\n" +
-      "👉 Forma: Envío express a domicilio\n" +
-      "👉 Datos recibidos correctamente.\n" +
-      "💰 El costo incluye S/10 adicionales por envío a domicilio.");
+  await enviarMensajeTexto(senderId,
+    "✅ Su orden ha sido confirmada ✔\nEnvío de: 1 Reloj Premium\n" +
+    "👉 Forma: Envío express a domicilio\n" +
+    "👉 Datos recibidos correctamente.\n" +
+    "💰 El costo incluye S/10 adicionales por envío a domicilio.");
 
-    delete estadoUsuario[from];
-    return;
-  }
+  delete estadoUsuario[senderId];
+  return;
+}
 
-  if (!avisoEnviado[from]) {
-    await enviarMensajeTexto(from,
-      "📌 Por favor, asegúrese de enviar sus datos correctos (nombre, WhatsApp, DNI/dirección y agencia Shalom).");
-    avisoEnviado[from] = true;
-  }
+if (!avisoEnviado[senderId]) {
+  await enviarMensajeTexto(senderId,
+    "📌 Por favor, asegúrese de enviar sus datos correctos (nombre, WhatsApp, DNI/dirección y agencia Shalom).");
+  avisoEnviado[senderId] = true;
+}
 
 // 🔹 ENVIAR MENSAJE TEXTO (adaptado para WhatsApp)
 async function enviarMensajeTexto(to, text) {
