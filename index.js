@@ -422,7 +422,15 @@ async function manejarFlujoCompra(senderId, mensaje) {
 
 // ===== FUNCIÓN MEJORADA PARA LAS PROMOCIONES =====
 async function enviarInfoPromo(to, producto) {
+  // 1. VERIFICACIÓN DE DATOS: Nos aseguramos de que el producto exista antes de continuar.
+  if (!producto || !producto.nombre) {
+    console.error('❌ Se intentó enviar una promo con datos inválidos o faltantes. Revisa tu promoData.json.');
+    await enviarMensajeTexto(to, '⚠️ Lo siento, no pude encontrar los detalles de esa promoción en este momento.');
+    return;
+  }
+
   try {
+    // 2. CONSTRUCCIÓN DEL MENSAJE (sin cambios)
     const detallesProducto =
       `*${producto.nombre}*\n` +
       `${producto.descripcion}\n` +
@@ -463,6 +471,7 @@ async function enviarInfoPromo(to, producto) {
       }
     };
 
+    // 3. ENVÍO DEL MENSAJE (sin cambios)
     await axios.post(
       `https://graph.facebook.com/v18.0/${phoneNumberId}/messages`,
       payload,
@@ -470,7 +479,8 @@ async function enviarInfoPromo(to, producto) {
     );
 
   } catch (error) {
-    console.error(`❌ Error enviando promo para ${producto.codigo}:`, error.response ? JSON.stringify(error.response.data) : error.message);
+    // 4. MANEJO DE ERRORES CORREGIDO
+    console.error(`❌ Error enviando promo para "${producto.nombre}":`, error.response ? JSON.stringify(error.response.data) : error.message);
     await enviarMensajeTexto(to, '⚠️ Lo siento, hubo un problema al mostrar esa promoción.');
   }
 }
