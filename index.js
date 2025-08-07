@@ -3,15 +3,11 @@ const bodyParser = require('body-parser');
 const axios = require('axios');
 const fs = require('fs');
 require('dotenv').config();
-const { OpenAI } = require('openai');
 
 // Carga de datos de catálogos y promociones y prompt del sistema
 const data = require('./data.json');
 const promoData = require('./promoData.json');
 const systemPrompt = fs.readFileSync('./SystemPrompt.txt', 'utf-8');
-
-// Configuración de OpenAI
-const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 // Memoria de conversaciones y estados de flujo
 const memoriaConversacion = {};
@@ -173,14 +169,13 @@ async function enviarCatalogo(to, tipo) {
         { headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` } }
       );
     }
-    // Agregar botón para volver al inicio
     await enviarMensajeConBotonSalir(to, '¿Deseas ver otra sección?');
   } catch (error) {
     console.error('❌ Error enviando catálogo:', error.response?.data || error.message);
   }
 }
 
-// Lógica de ChatGPT con memoria y triggers
+// Lógica de ChatGPT con memoria y triggers usando axios
 async function enviarConsultaChatGPT(senderId, mensajeCliente) {
   try {
     if (!memoriaConversacion[senderId]) memoriaConversacion[senderId] = [];
@@ -193,12 +188,13 @@ async function enviarConsultaChatGPT(senderId, mensajeCliente) {
       ...memoriaConversacion[senderId]
     ];
 
-    const completion = await client.chat.completions.create({
-      model: 'gpt-4o',
-      messages: contexto
-    });
+    const response = await axios.post(
+      'https://api.openai.com/v1/chat/completions',
+      { model: 'gpt-4o', messages: contexto },
+      { headers: { 'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`, 'Content-Type': 'application/json' } }
+    );
 
-    const respuesta = completion.choices[0].message.content.trim();
+    const respuesta = response.data.choices[0].message.content.trim();
     memoriaConversacion[senderId].push({ role: 'assistant', content: respuesta });
 
     if (respuesta.startsWith('MOSTRAR_MODELO:')) {
