@@ -224,7 +224,7 @@ async function enviarMenuPrincipal(to) {
       { headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` } }
     );
   } catch (error) {
-    console.error('❌ Error enviando menú principal:', error.response?.data || error.message);
+    console.error('❌ Error enviando menú principal:', JSON.stringify(error.response.data));
   }
 }
 
@@ -253,11 +253,11 @@ async function enviarSubmenuTipoReloj(to, genero) {
       { headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` } }
     );
   } catch (error) {
-    console.error('❌ Error enviando submenu:', error.response?.data || error.message);
+    console.error('❌ Error enviando submenu:', JSON.stringify(error.response.data));
   }
 }
 
-// ✅✅✅ --- FUNCIÓN CORREGIDA Y DEFINITIVA --- ✅✅✅
+// ✅✅✅ --- FUNCIÓN CORREGIDA Y ROBUSTA --- ✅✅✅
 async function enviarCatalogo(to, tipo) {
   try {
     const productos = data[tipo];
@@ -266,51 +266,43 @@ async function enviarCatalogo(to, tipo) {
       return;
     }
 
+    // Recorremos cada producto para enviarlo
     for (const producto of productos) {
+      
+      // --- PASO 1: INTENTAR ENVIAR LA IMAGEN (CON CONTROL DE ERRORES) ---
+      try {
+        await axios.post(
+          `https://graph.facebook.com/v18.0/${phoneNumberId}/messages`,
+          {
+            messaging_product: 'whatsapp',
+            recipient_type: 'individual',
+            to: to,
+            type: 'image',
+            image: { link: producto.imagen }
+          },
+          { headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` } }
+        );
+      } catch (imageError) {
+        // Si la imagen falla, lo registramos y notificamos, pero NO detenemos el flujo.
+        console.error(`❌ Fallo al enviar imagen para producto ${producto.codigo}:`, imageError.response ? JSON.stringify(imageError.response.data) : imageError.message);
+        await enviarMensajeTexto(to, `⚠️ No se pudo cargar la imagen para *${producto.nombre}*.`);
+      }
+
+      // --- PASO 2: ENVIAR LOS DETALLES Y EL BOTÓN (ESTO SÍ FUNCIONA) ---
+      // Este bloque se ejecutará siempre, incluso si la imagen falló.
       const detallesProducto =
         `*${producto.nombre}*\n` +
         `${producto.descripcion}\n` +
         `💲 ${producto.precio} soles\n` +
         `Código: ${producto.codigo}`;
-
-      const payload = {
-        messaging_product: 'whatsapp',
-        recipient_type: 'individual',
-        to: to,
-        type: 'interactive',
-        interactive: {
-          type: 'button',
-          header: {
-            type: 'image',
-            image: {
-              link: producto.imagen
-            }
-          },
-          body: {
-            text: detallesProducto
-          },
-          action: {
-            buttons: [
-              {
-                type: 'reply',
-                reply: {
-                  id: 'COMPRAR_PRODUCTO',
-                  title: '🛍️ Comprar'
-                }
-              }
-            ]
-          }
-        }
-      };
       
-      await axios.post(
-        `https://graph.facebook.com/v18.0/${phoneNumberId}/messages`,
-        payload,
-        { headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` } }
-      );
+      // Usamos la función que ya sabemos que funciona para enviar el texto con el botón.
+      await enviarMensajeConBotonComprar(to, detallesProducto);
     }
+    
   } catch (error) {
-    console.error(`❌ Error fatal en enviarCatalogo para el tipo "${tipo}":`, error.message);
+    // Este es un catch general por si todo el proceso falla
+    console.error(`❌ Error fatal en la función enviarCatalogo para el tipo "${tipo}":`, error.message);
     if (error.response) {
       console.error('❌ Datos del error de la API de Meta:', JSON.stringify(error.response.data, null, 2));
     }
@@ -434,6 +426,7 @@ async function enviarInfoPromo(to, producto) {
         `https://graph.facebook.com/v18.0/${phoneNumberId}/messages`,
         {
           messaging_product: 'whatsapp',
+          recipient_type: 'individual',
           to,
           type: 'image',
           image: { link: promo.imagen, caption: `${promo.descripcion}` }
@@ -445,7 +438,7 @@ async function enviarInfoPromo(to, producto) {
     await enviarMensajeTexto(to, productInfo);
     await enviarMensajeConBotonSalir(to, '¿Necesitas algo más?');
   } catch (error) {
-    console.error('❌ Error enviando promoción:', error.response?.data || error.message);
+    console.error('❌ Error enviando promoción:', JSON.stringify(error.response.data));
   }
 }
 
@@ -454,11 +447,11 @@ async function enviarMensajeTexto(to, text) {
   try {
     await axios.post(
       `https://graph.facebook.com/v18.0/${phoneNumberId}/messages`,
-      { messaging_product: 'whatsapp', to, text: { body: text } },
+      { messaging_product: 'whatsapp', recipient_type: 'individual', to, text: { body: text } },
       { headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` } }
     );
   } catch (error) {
-    console.error('❌ Error enviando mensaje de texto:', error.response?.data || error.message);
+    console.error('❌ Error enviando mensaje de texto:', JSON.stringify(error.response.data));
   }
 }
 
@@ -481,7 +474,7 @@ async function enviarMensajeConBotonSalir(to, text) {
       { headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` } }
     );
   } catch (error) {
-    console.error('❌ Error enviando botón salir:', error.response?.data || error.message);
+    console.error('❌ Error enviando botón salir:', JSON.stringify(error.response.data));
   }
 }
 
@@ -504,7 +497,7 @@ async function enviarMensajeConBotonComprar(to, text) {
       { headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` } }
     );
   } catch (error) {
-    console.error('❌ Error enviando botón de comprar:', error.response?.data || error.message);
+    console.error('❌ Error enviando botón de comprar:', JSON.stringify(error.response.data));
   }
 }
 
@@ -532,7 +525,7 @@ async function enviarPreguntaUbicacion(senderId) {
       { headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` } }
     );
   } catch (error) {
-    console.error('❌ Error enviando pregunta de ubicación:', error.response?.data || error.message);
+    console.error('❌ Error enviando pregunta de ubicación:', JSON.stringify(error.response.data));
   }
 }
 
