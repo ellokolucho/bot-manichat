@@ -79,7 +79,6 @@ async function finalizarSesion(senderId) {
   }
 }
 
-
 // Recepción de mensajes y flujos interactivos (Webhook de WhatsApp)
 app.post('/webhook', async (req, res) => {
   console.log('📩 Webhook recibido:', JSON.stringify(req.body, null, 2));
@@ -139,6 +138,9 @@ app.post('/webhook', async (req, res) => {
         case 'COMPRAR_PROVINCIA':
           estadoUsuario[from] = 'ESPERANDO_DATOS_PROVINCIA';
           await enviarMensajeTexto(from, "😊 Claro que sí. Por favor, permítanos los siguientes datos para programar su pedido:\n\n✅ Nombre completo ✍️\n✅ DNI 🪪\n✅ Número de WhatsApp 📱\n✅ Agencia Shalom que le queda más cerca 🚚");
+          break;
+        case 'COMPRAR_PRODUCTO':
+          await enviarPreguntaUbicacion(from);
           break;
         default:
           if (buttonId.startsWith('COMPRAR_')) {
@@ -264,12 +266,15 @@ async function enviarCatalogo(to, tipo) {
       await enviarMensajeTexto(to, '😔 Lo siento, no hay productos disponibles para esa categoría.');
       return;
     }
+    
+    // Envía los productos uno por uno
     for (const producto of productos) {
       const caption =
         `*${producto.nombre}*\n` +
         `${producto.descripcion}\n` +
         `💲 ${producto.precio} soles\n` +
         `Código: ${producto.codigo}`;
+      
       await axios.post(
         `https://graph.facebook.com/v18.0/${phoneNumberId}/messages`,
         {
@@ -280,15 +285,20 @@ async function enviarCatalogo(to, tipo) {
         },
         { headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` } }
       );
-      await enviarPreguntaUbicacion(to, `COMPRAR_${producto.codigo}`);
     }
-    await enviarMensajeConBotonSalir(to, '¿Deseas ver otra sección?');
+    
+    // Al final del catálogo, pregunta si desea comprar
+    await enviarMensajeConBotonComprar(to, '¿Te gustó alguno de nuestros productos?');
+    
+    // y ofrece la opción de volver al menú
+    await enviarMensajeConBotonSalir(to, 'También puedes ver otra sección.');
+    
   } catch (error) {
     console.error('❌ Error enviando catálogo:', error.response?.data || error.message);
   }
 }
 
-// Lógica de ChatGPT con memoria y triggers usando axios
+// Lógica de ChatGPT con memoria y triggers
 async function enviarConsultaChatGPT(senderId, mensajeCliente) {
   try {
     if (!memoriaConversacion[senderId]) memoriaConversacion[senderId] = [];
@@ -451,6 +461,28 @@ async function enviarMensajeConBotonSalir(to, text) {
     );
   } catch (error) {
     console.error('❌ Error enviando botón salir:', error.response?.data || error.message);
+  }
+}
+
+// 🆕 Nueva función para enviar el botón de comprar
+async function enviarMensajeConBotonComprar(to, text) {
+  try {
+    await axios.post(
+      `https://graph.facebook.com/v18.0/${phoneNumberId}/messages`,
+      {
+        messaging_product: 'whatsapp',
+        to,
+        type: 'interactive',
+        interactive: {
+          type: 'button',
+          body: { text },
+          action: { buttons: [{ type: 'reply', reply: { id: 'COMPRAR_PRODUCTO', title: '🛍️ Comprar' } }] }
+        }
+      },
+      { headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` } }
+    );
+  } catch (error) {
+    console.error('❌ Error enviando botón de comprar:', error.response?.data || error.message);
   }
 }
 
