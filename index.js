@@ -95,11 +95,10 @@ app.post('/webhook', async (req, res) => {
     const message = body.entry[0].changes[0].value.messages[0];
     const from = message.from;
     const type = message.type;
-    const text = message.text?.body;
 
     reiniciarTimerInactividad(from);
 
-    // Manejo de botones interactivos
+    // --- MANEJO DE BOTONES (SIN CAMBIOS) ---
     if (type === 'interactive' && message.interactive?.button_reply?.id) {
       const buttonId = message.interactive.button_reply.id;
       switch (buttonId) {
@@ -149,49 +148,44 @@ app.post('/webhook', async (req, res) => {
       return res.sendStatus(200);
     }
 
-    // Manejo de mensajes de texto libres
-    if (type === 'text' && text) {
+    // --- NUEVA LÓGICA PARA MENSAJES DE TEXTO ---
+    if (type === 'text') {
+      const text = message.text.body;
       const mensaje = text.trim().toLowerCase();
 
-      // Flujo de compra
+      // PRIORIDAD 1: Flujos activos (el bot espera datos)
       if (estadoUsuario[from] === 'ESPERANDO_DATOS_LIMA' || estadoUsuario[from] === 'ESPERANDO_DATOS_PROVINCIA') {
-        await manejarFlujoCompra(from, mensaje);
+        await manejarFlujoCompra(from, text);
         return res.sendStatus(200);
       }
-      
-      // Modo asesor
       if (estadoUsuario[from] === 'ASESOR') {
         if (mensaje === 'salir') {
-          delete estadoUsuario[from];
-          delete memoriaConversacion[from];
-          delete contadorMensajesAsesor[from];
-          await enviarMensajeTexto(from, "🚪 Has salido del chat con asesor. Volviendo al menú principal...");
-          await enviarMenuPrincipal(from);
-          return res.sendStatus(200);
+            delete estadoUsuario[from];
+            delete memoriaConversacion[from];
+            delete contadorMensajesAsesor[from];
+            await enviarMensajeTexto(from, "🚪 Has salido del chat con asesor.");
+            await enviarMenuPrincipal(from);
+        } else {
+            await enviarConsultaChatGPT(from, text);
         }
-        await enviarConsultaChatGPT(from, text);
         return res.sendStatus(200);
       }
 
-      // Triggers específicos
-      if (/^(gracias|muchas gracias|mil gracias|gracias!|gracias :\))$/i.test(mensaje)) {
-        await enviarMensajeTexto(from, "😄 ¡Gracias a usted! Estamos para servirle.");
+      // PRIORIDAD 2: Comandos específicos (ej. "gracias")
+      if (/^(gracias|muchas gracias|mil gracias)$/i.test(mensaje)) {
+        await enviarMensajeTexto(from, "😄 ¡De nada! Estamos para servirle.");
         return res.sendStatus(200);
       }
 
-      if (mensaje.includes('hola')) {
-        await enviarMenuPrincipal(from);
-        return res.sendStatus(200);
-      }
-
-      // Si no es el primer mensaje, enviar a ChatGPT
+      // PRIORIDAD 3: Lógica por defecto (Primera interacción vs. ChatGPT)
       if (primerMensaje[from]) {
+        // Si no es la primera interacción, cualquier texto libre va a ChatGPT
         await enviarConsultaChatGPT(from, text);
       } else {
-        primerMensaje[from] = true;
+        // Si es la primera interacción del usuario, le mostramos el menú principal
+        primerMensaje[from] = true; // Marcamos que ya tuvimos la primera interacción
         await enviarMenuPrincipal(from);
       }
-      
       return res.sendStatus(200);
     }
   }
@@ -211,12 +205,12 @@ async function enviarMenuPrincipal(to) {
         type: 'interactive',
         interactive: {
           type: 'button',
-          body: { text: '👋 ¡Hola! Bienvenido a Tiendas Megan\n⌚💎 Descubre tu reloj ideal o el regalo perfecto 🎁' },
+          body: { text: '👋 ¡Hola! Bienvenido a Tiendas Megan\n💎 Descubre tu reloj ideal o el regalo perfecto 🎁' },
           action: {
             buttons: [
-              { type: 'reply', reply: { id: 'CABALLEROS', title: '⌚ Para Caballeros' } },
-              { type: 'reply', reply: { id: 'DAMAS', title: '🕒 Para Damas' } },
-              { type: 'reply', reply: { id: 'ASESOR', title: '💬 Hablar con Asesor' } }
+              { type: 'reply', reply: { id: 'CABALLEROS', title: 'Para Caballeros' } },
+              { type: 'reply', reply: { id: 'DAMAS', title: 'Para Damas' } },
+              { type: 'reply', reply: { id: 'ASESOR', title: 'Hablar con Asesor' } }
             ]
           }
         }
