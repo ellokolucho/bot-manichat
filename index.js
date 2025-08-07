@@ -139,7 +139,7 @@ app.post('/webhook', async (req, res) => {
           estadoUsuario[from] = 'ESPERANDO_DATOS_PROVINCIA';
           await enviarMensajeTexto(from, "😊 Claro que sí. Por favor, permítanos los siguientes datos para programar su pedido:\n\n✅ Nombre completo ✍️\n✅ DNI 🪪\n✅ Número de WhatsApp 📱\n✅ Agencia Shalom que le queda más cerca 🚚");
           break;
-        case 'COMPRAR_PRODUCTO':
+        case 'COMPRAR_PRODUCTO': // 🆕 Este botón se ha añadido para enlazar con el catálogo
           await enviarPreguntaUbicacion(from);
           break;
         default:
@@ -258,7 +258,7 @@ async function enviarSubmenuTipoReloj(to, genero) {
   }
 }
 
-// Envía catálogo de productos
+// ✅ Envía catálogo de productos (Lógica corregida)
 async function enviarCatalogo(to, tipo) {
   try {
     const productos = data[tipo];
