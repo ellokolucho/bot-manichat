@@ -98,10 +98,20 @@ app.post('/webhook', async (req, res) => {
 
     reiniciarTimerInactividad(from);
 
-    // --- MANEJO DE BOTONES (SIN CAMBIOS) ---
+    // --- MANEJO DE BOTONES (CON CAMBIOS) ---
     if (type === 'interactive' && message.interactive?.button_reply?.id) {
       const buttonId = message.interactive.button_reply.id;
+
+      // Maneja los botones de compra de las promociones
+      if (buttonId.startsWith('COMPRAR_PRODUCTO_')) {
+          await enviarPreguntaUbicacion(from);
+          return res.sendStatus(200);
+      }
+
       switch (buttonId) {
+        case 'VER_MODELOS':
+          await enviarMenuPrincipal(from);
+          break;
         case 'CABALLEROS':
         case 'DAMAS':
           await enviarSubmenuTipoReloj(from, buttonId);
@@ -139,16 +149,13 @@ app.post('/webhook', async (req, res) => {
           estadoUsuario[from] = 'ESPERANDO_DATOS_PROVINCIA';
           await enviarMensajeTexto(from, "😊 Claro que sí. Por favor, permítanos los siguientes datos para programar su pedido:\n\n✅ Nombre completo ✍️\n✅ DNI 🪪\n✅ Número de WhatsApp 📱\n✅ Agencia Shalom que le queda más cerca 🚚");
           break;
-        case 'COMPRAR_PRODUCTO':
-          await enviarPreguntaUbicacion(from);
-          break;
         default:
           await enviarMensajeTexto(from, '❓ No entendí tu selección, por favor intenta de nuevo.');
       }
       return res.sendStatus(200);
     }
 
-    // --- NUEVA LÓGICA PARA MENSAJES DE TEXTO ---
+    // --- LÓGICA PARA MENSAJES DE TEXTO (CON CAMBIOS) ---
     if (type === 'text') {
       const text = message.text.body;
       const mensaje = text.trim().toLowerCase();
@@ -170,6 +177,16 @@ app.post('/webhook', async (req, res) => {
         }
         return res.sendStatus(200);
       }
+      
+      // Disparadores de promociones
+      if (mensaje.includes('me interesa este reloj exclusivo')) {
+          await enviarInfoPromo(from, promoData.reloj1);
+          return res.sendStatus(200);
+      }
+      if (mensaje.includes('me interesa este reloj de lujo')) {
+          await enviarInfoPromo(from, promoData.reloj2);
+          return res.sendStatus(200);
+      }
 
       // PRIORIDAD 2: Comandos específicos (ej. "gracias")
       if (/^(gracias|muchas gracias|mil gracias)$/i.test(mensaje)) {
@@ -179,11 +196,9 @@ app.post('/webhook', async (req, res) => {
 
       // PRIORIDAD 3: Lógica por defecto (Primera interacción vs. ChatGPT)
       if (primerMensaje[from]) {
-        // Si no es la primera interacción, cualquier texto libre va a ChatGPT
         await enviarConsultaChatGPT(from, text);
       } else {
-        // Si es la primera interacción del usuario, le mostramos el menú principal
-        primerMensaje[from] = true; // Marcamos que ya tuvimos la primera interacción
+        primerMensaje[from] = true;
         await enviarMenuPrincipal(from);
       }
       return res.sendStatus(200);
@@ -251,7 +266,7 @@ async function enviarSubmenuTipoReloj(to, genero) {
   }
 }
 
-// ✅✅✅ --- FUNCIÓN CON PAUSA AÑADIDA --- ✅✅✅
+// Envía catálogo de productos
 async function enviarCatalogo(to, tipo) {
   try {
     const productos = data[tipo];
@@ -262,7 +277,6 @@ async function enviarCatalogo(to, tipo) {
 
     for (const producto of productos) {
       try {
-        // PASO 1: Enviar la imagen
         await axios.post(
           `https://graph.facebook.com/v18.0/${phoneNumberId}/messages`,
           {
@@ -275,7 +289,6 @@ async function enviarCatalogo(to, tipo) {
           { headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` } }
         );
 
-        // Añadimos una pausa de 1.5 segundos (1500 milisegundos)
         await new Promise(resolve => setTimeout(resolve, 1500)); 
 
       } catch (imageError) {
@@ -283,7 +296,6 @@ async function enviarCatalogo(to, tipo) {
         await enviarMensajeTexto(to, `⚠️ No se pudo cargar la imagen para *${producto.nombre}*.`);
       }
 
-      // PASO 2: Enviar el texto y botón
       const detallesProducto =
         `*${producto.nombre}*\n` +
         `${producto.descripcion}\n` +
@@ -353,7 +365,6 @@ async function enviarConsultaChatGPT(senderId, mensajeCliente) {
       return;
     }
     
-    // Si no hay trigger, enviamos la respuesta normal
     if (!contadorMensajesAsesor[senderId] || contadorMensajesAsesor[senderId] < 6) {
       await enviarMensajeTexto(senderId, respuesta);
     } else {
@@ -409,28 +420,58 @@ async function manejarFlujoCompra(senderId, mensaje) {
   }
 }
 
-// Envía promociones e info de producto
+// ===== FUNCIÓN MEJORADA PARA LAS PROMOCIONES =====
 async function enviarInfoPromo(to, producto) {
   try {
-    const promo = promoData[producto.codigo];
-    if (promo) {
-      await axios.post(
-        `https://graph.facebook.com/v18.0/${phoneNumberId}/messages`,
-        {
-          messaging_product: 'whatsapp',
-          recipient_type: 'individual',
-          to,
+    const detallesProducto =
+      `*${producto.nombre}*\n` +
+      `${producto.descripcion}\n` +
+      `💰 Precio: ${producto.precio}`;
+
+    const payload = {
+      messaging_product: 'whatsapp',
+      recipient_type: 'individual',
+      to: to,
+      type: 'interactive',
+      interactive: {
+        type: 'button',
+        header: {
           type: 'image',
-          image: { link: promo.imagen, caption: `${promo.descripcion}` }
+          image: { link: producto.imagen }
         },
-        { headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` } }
-      );
-    }
-    const productInfo = `*${producto.nombre}*\n${producto.descripcion}\n💲 ${producto.precio} soles\nCódigo: ${producto.codigo}`;
-    await enviarMensajeTexto(to, productInfo);
-    await enviarMensajeConBotonSalir(to, '¿Necesitas algo más?');
+        body: {
+          text: detallesProducto
+        },
+        action: {
+          buttons: [
+            {
+              type: 'reply',
+              reply: {
+                id: `COMPRAR_PRODUCTO_${producto.codigo}`,
+                title: '🛍️ Comprar Ahora'
+              }
+            },
+            {
+              type: 'reply',
+              reply: {
+                id: 'VER_MODELOS',
+                title: '📖 Ver otros modelos'
+              }
+            }
+          ]
+        }
+      }
+    };
+
+    await axios.post(
+      `https://graph.facebook.com/v18.0/${phoneNumberId}/messages`,
+      payload,
+      { headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` } }
+    );
+
   } catch (error) {
-    console.error('❌ Error enviando promoción:', JSON.stringify(error.response.data));
+    console.error(`❌ Error enviando promo para ${producto.codigo}:`, error.response ? JSON.stringify(error.response.data) : error.message);
+    await enviarMensajeTexto(to, '⚠️ Lo siento, hubo un problema al mostrar esa promoción.');
   }
 }
 
@@ -470,7 +511,7 @@ async function enviarMensajeConBotonSalir(to, text) {
   }
 }
 
-// 🆕 Nueva función para enviar el botón de comprar
+// Función para enviar el botón de comprar
 async function enviarMensajeConBotonComprar(to, text) {
   try {
     await axios.post(
@@ -483,7 +524,7 @@ async function enviarMensajeConBotonComprar(to, text) {
         interactive: {
           type: 'button',
           body: { text },
-          action: { buttons: [{ type: 'reply', reply: { id: 'COMPRAR_PRODUCTO', title: '🛍️ Comprar' } }] }
+          action: { buttons: [{ type: 'reply', reply: { id: `COMPRAR_PRODUCTO_`, title: '🛍️ Comprar' } }] }
         }
       },
       { headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` } }
