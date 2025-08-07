@@ -139,15 +139,12 @@ app.post('/webhook', async (req, res) => {
           estadoUsuario[from] = 'ESPERANDO_DATOS_PROVINCIA';
           await enviarMensajeTexto(from, "😊 Claro que sí. Por favor, permítanos los siguientes datos para programar su pedido:\n\n✅ Nombre completo ✍️\n✅ DNI 🪪\n✅ Número de WhatsApp 📱\n✅ Agencia Shalom que le queda más cerca 🚚");
           break;
+        // 🆕 Nuevo caso para el botón "Comprar"
         case 'COMPRAR_PRODUCTO':
           await enviarPreguntaUbicacion(from);
           break;
         default:
-          if (buttonId.startsWith('COMPRAR_')) {
-            await enviarPreguntaUbicacion(from);
-          } else {
-            await enviarMensajeTexto(from, '❓ No entendí tu selección, por favor intenta de nuevo.');
-          }
+          await enviarMensajeTexto(from, '❓ No entendí tu selección, por favor intenta de nuevo.');
       }
       return res.sendStatus(200);
     }
@@ -289,9 +286,6 @@ async function enviarCatalogo(to, tipo) {
     
     // Al final del catálogo, pregunta si desea comprar
     await enviarMensajeConBotonComprar(to, '¿Te gustó alguno de nuestros productos?');
-    
-    // y ofrece la opción de volver al menú
-    await enviarMensajeConBotonSalir(to, 'También puedes ver otra sección.');
     
   } catch (error) {
     console.error('❌ Error enviando catálogo:', error.response?.data || error.message);
