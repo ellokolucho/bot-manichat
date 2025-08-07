@@ -6,6 +6,7 @@ require('dotenv').config();
 
 // Carga de datos de catálogos y promociones y prompt del sistema
 const data = require('./data.json');
+console.log('📦 Categorías cargadas en data.json:', Object.keys(data));
 const promoData = require('./promoData.json');
 const systemPrompt = fs.readFileSync('./SystemPrompt.txt', 'utf-8');
 
@@ -55,6 +56,7 @@ app.post('/webhook', async (req, res) => {
     // Manejo de botones interactivos
     if (type === 'interactive' && message.interactive?.button_reply?.id) {
       const buttonId = message.interactive.button_reply.id;
+      console.log('🛠 Botón recibido:', buttonId);
       switch (buttonId) {
         case 'CABALLEROS':
           await enviarSubmenuTipoReloj(from, 'CABALLEROS');
@@ -154,6 +156,7 @@ async function enviarSubmenuTipoReloj(to, genero) {
 
 // Envía catálogo de productos
 async function enviarCatalogo(to, tipo) {
+  console.log(`🔎 enviarCatalogo invocado con tipo='${tipo}', existe?`, data.hasOwnProperty(tipo));
   try {
     const productos = data[tipo];
     if (!productos || productos.length === 0) {
