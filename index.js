@@ -157,6 +157,9 @@ async function enviarSubmenuTipoReloj(to, genero) {
 // Envía catálogo de productos
 async function enviarCatalogo(to, tipo) {
   console.log(`🔎 enviarCatalogo invocado con tipo='${tipo}', existe?`, data.hasOwnProperty(tipo));
+    // DEBUG: enviamos un mensaje sencillo para confirmar invocación
+  await enviarMensajeTexto(to, `⚠️ Debug: enviarCatalogo('${tipo}') invocado`);
+
   try {
     const productos = data[tipo];
     if (!productos || productos.length === 0) {
