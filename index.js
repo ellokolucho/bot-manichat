@@ -11,7 +11,7 @@ const phoneNumberId = process.env.PHONE_NUMBER_ID;
 
 // Endpoint para verificar el webhook (usado por Meta)
 app.get('/webhook', (req, res) => {
-  const verifyToken = 'botwhatsapp2025'; // El mismo que colocaste en Meta
+  const verifyToken = process.env.VERIFY_TOKEN; // El mismo que colocaste en Meta
   const mode = req.query['hub.mode'];
   const tokenFromMeta = req.query['hub.verify_token'];
   const challenge = req.query['hub.challenge'];
@@ -43,21 +43,8 @@ app.post('/webhook', async (req, res) => {
     console.log(`📨 Mensaje recibido de ${from}: ${text}`);
 
     if (text && text.toLowerCase().includes("hola")) {
-      await axios({
-        method: 'POST',
-        url: `https://graph.facebook.com/v18.0/${phoneNumberId}/messages`,
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`
-        },
-        data: {
-          messaging_product: 'whatsapp',
-          to: from,
-          text: {
-            body: 'Hola, ¿cómo estás? Estoy para ayudarte 😊'
-          }
-        }
-      });
+      await enviarMenuPrincipal(from);
+      return res.sendStatus(200);
     }
   }
 
@@ -65,6 +52,57 @@ app.post('/webhook', async (req, res) => {
 });
 
 const PORT = process.env.PORT || 3000;
+
+// Función para enviar menú principal en WhatsApp
+async function enviarMenuPrincipal(to) {
+  try {
+    await axios.post(`https://graph.facebook.com/v18.0/${phoneNumberId}/messages`, {
+      messaging_product: "whatsapp",
+      to,
+      type: "interactive",
+      interactive: {
+        type: "button",
+        body: {
+          text: "👋 ¡Hola! Bienvenido a Tiendas Megan\n⌚💎 Descubre tu reloj ideal o el regalo perfecto 🎁\nElige una opción para ayudarte 👇"
+        },
+        action: {
+          buttons: [
+            {
+              type: "reply",
+              reply: {
+                id: "CABALLEROS",
+                title: "⌚ Para Caballeros"
+              }
+            },
+            {
+              type: "reply",
+              reply: {
+                id: "DAMAS",
+                title: "🕒 Para Damas"
+              }
+            },
+            {
+              type: "reply",
+              reply: {
+                id: "ASESOR",
+                title: "💬 Hablar con Asesor"
+              }
+            }
+          ]
+        }
+      }
+    }, {
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`
+      }
+    });
+  } catch (error) {
+    console.error('❌ Error enviando menú principal:', error.response?.data || error.message);
+  }
+}
+
+
 app.listen(PORT, () => {
   console.log(`🚀 Servidor escuchando en http://0.0.0.0:${PORT}`);
 });
