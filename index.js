@@ -159,6 +159,8 @@ async function enviarCatalogo(to, tipo) {
   console.log(`🔎 enviarCatalogo invocado con tipo='${tipo}', existe?`, data.hasOwnProperty(tipo));
     // DEBUG: enviamos un mensaje sencillo para confirmar invocación
   await enviarMensajeTexto(to, `⚠️ Debug: enviarCatalogo('${tipo}') invocado`);
+console.log(`🔎 Productos a enviar (${tipo}):`, productos.length, productos.map(p => p.codigo));
+await enviarMensajeTexto(to, `🔔 Debug: ${productos.length} productos detectados: ${productos.map(p=>p.nombre).join(', ')}`);
 
   try {
     const productos = data[tipo];
