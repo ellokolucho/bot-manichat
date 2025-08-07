@@ -281,7 +281,6 @@ async function enviarCatalogo(to, tipo) {
     }
 
     for (const producto of productos) {
-      // CAMBIO 1: Se elimina la línea del código del producto
       const detallesProducto =
         `*${producto.nombre}*\n` +
         `${producto.descripcion}\n` +
@@ -307,7 +306,6 @@ async function enviarCatalogo(to, tipo) {
                 type: 'reply',
                 reply: {
                   id: `COMPRAR_PRODUCTO_${producto.codigo}`,
-                  // CAMBIO 2: Texto del botón más amigable
                   title: '🛍️ Pedir este modelo'
                 }
               }
@@ -325,11 +323,8 @@ async function enviarCatalogo(to, tipo) {
       await new Promise(resolve => setTimeout(resolve, 1000));
     }
     
-    // CAMBIO 3: Mensaje y botón final después de enviar el catálogo
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    await enviarMensajeTexto(to, "Tenemos estos modelos disponibles, ¿qué modelito le gustaría adquirir?");
-    await new Promise(resolve => setTimeout(resolve, 5000));
-    await enviarBotonVerModelos(to);
+    // Llamamos a la nueva función que maneja el mensaje final
+    await enviarMensajeFinalCatalogo(to);
     
   } catch (error) {
     console.error(`❌ Error fatal en la función enviarCatalogo para el tipo "${tipo}":`, error.message);
@@ -480,7 +475,6 @@ async function enviarInfoPromo(to, producto) {
               type: 'reply',
               reply: {
                 id: `COMPRAR_PRODUCTO_${producto.codigo}`,
-                // CAMBIO 2: Texto del botón más amigable
                 title: '🛍️ Pedir este modelo'
               }
             },
@@ -567,10 +561,14 @@ async function enviarMensajeConBotonComprar(to, text) {
   }
 }
 
-// ===== NUEVA FUNCIÓN AUXILIAR =====
-// Envía solo el botón de "Ver otros modelos"
-async function enviarBotonVerModelos(to) {
+// ===== NUEVA FUNCIÓN PARA EL MENSAJE FINAL DEL CATÁLOGO =====
+async function enviarMensajeFinalCatalogo(to) {
   try {
+    // Esperamos 10 segundos
+    await new Promise(resolve => setTimeout(resolve, 10000));
+
+    const textoAmigable = "✨ Tenemos estos modelos disponibles, ¿qué modelito le gustaría adquirir? 😉";
+
     await axios.post(
       `https://graph.facebook.com/v18.0/${phoneNumberId}/messages`,
       {
@@ -580,7 +578,7 @@ async function enviarBotonVerModelos(to) {
         type: 'interactive',
         interactive: {
           type: 'button',
-          body: { text: "¿Deseas explorar otras categorías?" },
+          body: { text: textoAmigable },
           action: {
             buttons: [{
               type: 'reply',
@@ -595,7 +593,7 @@ async function enviarBotonVerModelos(to) {
       { headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` } }
     );
   } catch (error) {
-    console.error('❌ Error enviando botón ver modelos:', JSON.stringify(error.response?.data || error.message));
+    console.error('❌ Error enviando mensaje final del catálogo:', JSON.stringify(error.response?.data || error.message));
   }
 }
 
