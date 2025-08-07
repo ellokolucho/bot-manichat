@@ -206,7 +206,6 @@ async function enviarMenuPrincipal(to) {
       `https://graph.facebook.com/v18.0/${phoneNumberId}/messages`,
       {
         messaging_product: 'whatsapp',
-        recipient_type: 'individual', // AÑADIDO
         to,
         type: 'interactive',
         interactive: {
@@ -236,7 +235,6 @@ async function enviarSubmenuTipoReloj(to, genero) {
       `https://graph.facebook.com/v18.0/${phoneNumberId}/messages`,
       {
         messaging_product: 'whatsapp',
-        recipient_type: 'individual', // AÑADIDO
         to,
         type: 'interactive',
         interactive: {
@@ -261,52 +259,36 @@ async function enviarSubmenuTipoReloj(to, genero) {
 async function enviarCatalogo(to, tipo) {
   try {
     const productos = data[tipo];
-    if (!productos || !productos.length) {
+    if (!productos || productos.length === 0) {
       await enviarMensajeTexto(to, '😔 Lo siento, no hay productos disponibles para esa categoría.');
       return;
     }
-
+    
+    // Recorremos y enviamos cada producto por separado
     for (const producto of productos) {
+      // PASO 1: Enviar la imagen del producto.
+      await axios.post(
+        `https://graph.facebook.com/v18.0/${phoneNumberId}/messages`,
+        {
+          messaging_product: 'whatsapp',
+          to,
+          type: 'image',
+          image: { link: producto.imagen }
+        },
+        { headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` } }
+      );
+
+      // PASO 2: Enviar un segundo mensaje con los detalles y el botón de compra.
       const detallesProducto =
         `*${producto.nombre}*\n` +
         `${producto.descripcion}\n` +
         `💲 ${producto.precio} soles\n` +
         `Código: ${producto.codigo}`;
-
-      await axios.post(
-        `https://graph.facebook.com/v18.0/${phoneNumberId}/messages`,
-        {
-          messaging_product: 'whatsapp',
-          recipient_type: 'individual', // AÑADIDO
-          to,
-          type: 'interactive',
-          interactive: {
-            type: 'button',
-            header: {
-              type: 'image',
-              image: {
-                link: producto.imagen
-              }
-            },
-            body: {
-              text: detallesProducto
-            },
-            action: {
-              buttons: [
-                {
-                  type: 'reply',
-                  reply: {
-                    id: 'COMPRAR_PRODUCTO',
-                    title: '🛍️ Comprar'
-                  }
-                }
-              ]
-            }
-          }
-        },
-        { headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` } }
-      );
+      
+      // Reutilizamos la función existente para enviar texto con botón
+      await enviarMensajeConBotonComprar(to, detallesProducto);
     }
+    
   } catch (error) {
     if (error.response) {
       console.error('❌ Error enviando catálogo (data):', JSON.stringify(error.response.data, null, 2));
@@ -316,7 +298,6 @@ async function enviarCatalogo(to, tipo) {
     await enviarMensajeTexto(to, '⚠️ Tuvimos un problema al mostrar el catálogo. Por favor, intenta de nuevo.');
   }
 }
-
 
 // Lógica de ChatGPT con memoria y triggers
 async function enviarConsultaChatGPT(senderId, mensajeCliente) {
@@ -434,7 +415,6 @@ async function enviarInfoPromo(to, producto) {
         `https://graph.facebook.com/v18.0/${phoneNumberId}/messages`,
         {
           messaging_product: 'whatsapp',
-          recipient_type: 'individual', // AÑADIDO
           to,
           type: 'image',
           image: { link: promo.imagen, caption: `${promo.descripcion}` }
@@ -470,7 +450,6 @@ async function enviarMensajeConBotonSalir(to, text) {
       `https://graph.facebook.com/v18.0/${phoneNumberId}/messages`,
       {
         messaging_product: 'whatsapp',
-        recipient_type: 'individual', // AÑADIDO
         to,
         type: 'interactive',
         interactive: {
@@ -493,7 +472,6 @@ async function enviarMensajeConBotonComprar(to, text) {
       `https://graph.facebook.com/v18.0/${phoneNumberId}/messages`,
       {
         messaging_product: 'whatsapp',
-        recipient_type: 'individual', // AÑADIDO
         to,
         type: 'interactive',
         interactive: {
@@ -516,7 +494,6 @@ async function enviarPreguntaUbicacion(senderId) {
       `https://graph.facebook.com/v18.0/${phoneNumberId}/messages`,
       {
         messaging_product: 'whatsapp',
-        recipient_type: 'individual', // AÑADIDO
         to: senderId,
         type: 'interactive',
         interactive: {
