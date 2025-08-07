@@ -255,40 +255,56 @@ async function enviarSubmenuTipoReloj(to, genero) {
   }
 }
 
-// ✅✅✅ --- FUNCIÓN CORREGIDA --- ✅✅✅
+// ✅✅✅ --- FUNCIÓN CORREGIDA Y MEJORADA --- ✅✅✅
 async function enviarCatalogo(to, tipo) {
   try {
     const productos = data[tipo];
-    if (!productos || productos.length === 0) {
+    if (!productos || !productos.length) {
       await enviarMensajeTexto(to, '😔 Lo siento, no hay productos disponibles para esa categoría.');
       return;
     }
-    
-    // Recorremos y enviamos cada producto por separado
-    for (const producto of productos) {
-      // PASO 1: Enviar la imagen del producto.
-      await axios.post(
-        `https://graph.facebook.com/v18.0/${phoneNumberId}/messages`,
-        {
-          messaging_product: 'whatsapp',
-          to,
-          type: 'image',
-          image: { link: producto.imagen }
-        },
-        { headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` } }
-      );
 
-      // PASO 2: Enviar un segundo mensaje con los detalles y el botón de compra.
+    for (const producto of productos) {
       const detallesProducto =
         `*${producto.nombre}*\n` +
         `${producto.descripcion}\n` +
         `💲 ${producto.precio} soles\n` +
         `Código: ${producto.codigo}`;
-      
-      // Reutilizamos la función existente para enviar texto con botón
-      await enviarMensajeConBotonComprar(to, detallesProducto);
+
+      // Usamos un solo mensaje interactivo con cabecera de imagen para cada producto
+      await axios.post(
+        `https://graph.facebook.com/v18.0/${phoneNumberId}/messages`,
+        {
+          messaging_product: 'whatsapp',
+          to,
+          type: 'interactive',
+          interactive: {
+            type: 'button',
+            header: {
+              type: 'image',
+              image: {
+                link: producto.imagen
+              }
+            },
+            body: {
+              text: detallesProducto
+            },
+            action: {
+              buttons: [
+                {
+                  type: 'reply',
+                  reply: {
+                    id: 'COMPRAR_PRODUCTO',
+                    title: '🛍️ Comprar'
+                  }
+                }
+              ]
+            }
+          }
+        },
+        { headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` } }
+      );
     }
-    
   } catch (error) {
     if (error.response) {
       console.error('❌ Error enviando catálogo (data):', JSON.stringify(error.response.data, null, 2));
@@ -298,6 +314,7 @@ async function enviarCatalogo(to, tipo) {
     await enviarMensajeTexto(to, '⚠️ Tuvimos un problema al mostrar el catálogo. Por favor, intenta de nuevo.');
   }
 }
+
 
 // Lógica de ChatGPT con memoria y triggers
 async function enviarConsultaChatGPT(senderId, mensajeCliente) {
