@@ -271,7 +271,7 @@ async function enviarSubmenuTipoReloj(to, genero) {
   }
 }
 
-// ===== FUNCIÓN DE CATÁLOGO UNIFICADA =====
+// ===== FUNCIÓN DE CATÁLOGO CON AJUSTES FINALES =====
 async function enviarCatalogo(to, tipo) {
   try {
     const productos = data[tipo];
@@ -281,13 +281,12 @@ async function enviarCatalogo(to, tipo) {
     }
 
     for (const producto of productos) {
+      // CAMBIO 1: Se elimina la línea del código del producto
       const detallesProducto =
         `*${producto.nombre}*\n` +
         `${producto.descripcion}\n` +
-        `💲 ${producto.precio} soles\n` +
-        `Código: ${producto.codigo}`;
+        `💲 ${producto.precio} soles`;
 
-      // Creamos el mismo tipo de payload que en las promociones
       const payload = {
         messaging_product: 'whatsapp',
         recipient_type: 'individual',
@@ -308,7 +307,8 @@ async function enviarCatalogo(to, tipo) {
                 type: 'reply',
                 reply: {
                   id: `COMPRAR_PRODUCTO_${producto.codigo}`,
-                  title: '🛍️ Comprar'
+                  // CAMBIO 2: Texto del botón más amigable
+                  title: '🛍️ Pedir este modelo'
                 }
               }
             ]
@@ -322,9 +322,14 @@ async function enviarCatalogo(to, tipo) {
         { headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` } }
       );
       
-      // Añadimos una pequeña pausa opcional para no saturar al usuario
       await new Promise(resolve => setTimeout(resolve, 1000));
     }
+    
+    // CAMBIO 3: Mensaje y botón final después de enviar el catálogo
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    await enviarMensajeTexto(to, "Tenemos estos modelos disponibles, ¿qué modelito le gustaría adquirir?");
+    await new Promise(resolve => setTimeout(resolve, 5000));
+    await enviarBotonVerModelos(to);
     
   } catch (error) {
     console.error(`❌ Error fatal en la función enviarCatalogo para el tipo "${tipo}":`, error.message);
@@ -475,7 +480,8 @@ async function enviarInfoPromo(to, producto) {
               type: 'reply',
               reply: {
                 id: `COMPRAR_PRODUCTO_${producto.codigo}`,
-                title: '🛍️ Comprar Ahora'
+                // CAMBIO 2: Texto del botón más amigable
+                title: '🛍️ Pedir este modelo'
               }
             },
             {
@@ -551,13 +557,45 @@ async function enviarMensajeConBotonComprar(to, text) {
         interactive: {
           type: 'button',
           body: { text },
-          action: { buttons: [{ type: 'reply', reply: { id: `COMPRAR_PRODUCTO`, title: '🛍️ Comprar' } }] }
+          action: { buttons: [{ type: 'reply', reply: { id: `COMPRAR_PRODUCTO`, title: '🛍️ Pedir este modelo' } }] }
         }
       },
       { headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` } }
     );
   } catch (error) {
     console.error('❌ Error enviando botón de comprar:', JSON.stringify(error.response?.data || error.message));
+  }
+}
+
+// ===== NUEVA FUNCIÓN AUXILIAR =====
+// Envía solo el botón de "Ver otros modelos"
+async function enviarBotonVerModelos(to) {
+  try {
+    await axios.post(
+      `https://graph.facebook.com/v18.0/${phoneNumberId}/messages`,
+      {
+        messaging_product: 'whatsapp',
+        recipient_type: 'individual',
+        to: to,
+        type: 'interactive',
+        interactive: {
+          type: 'button',
+          body: { text: "¿Deseas explorar otras categorías?" },
+          action: {
+            buttons: [{
+              type: 'reply',
+              reply: {
+                id: 'VER_MODELOS',
+                title: '📖 Ver otros modelos'
+              }
+            }]
+          }
+        }
+      },
+      { headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` } }
+    );
+  } catch (error) {
+    console.error('❌ Error enviando botón ver modelos:', JSON.stringify(error.response?.data || error.message));
   }
 }
 
