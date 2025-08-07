@@ -271,7 +271,7 @@ async function enviarSubmenuTipoReloj(to, genero) {
   }
 }
 
-// Envía catálogo de productos
+// ===== FUNCIÓN DE CATÁLOGO UNIFICADA =====
 async function enviarCatalogo(to, tipo) {
   try {
     const productos = data[tipo];
@@ -281,33 +281,49 @@ async function enviarCatalogo(to, tipo) {
     }
 
     for (const producto of productos) {
-      try {
-        await axios.post(
-          `https://graph.facebook.com/v18.0/${phoneNumberId}/messages`,
-          {
-            messaging_product: 'whatsapp',
-            recipient_type: 'individual',
-            to: to,
-            type: 'image',
-            image: { link: producto.imagen }
-          },
-          { headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` } }
-        );
-
-        await new Promise(resolve => setTimeout(resolve, 1500)); 
-
-      } catch (imageError) {
-        console.error(`❌ Fallo al enviar imagen para producto ${producto.codigo}:`, imageError.response ? JSON.stringify(imageError.response.data) : imageError.message);
-        await enviarMensajeTexto(to, `⚠️ No se pudo cargar la imagen para *${producto.nombre}*.`);
-      }
-
       const detallesProducto =
         `*${producto.nombre}*\n` +
         `${producto.descripcion}\n` +
         `💲 ${producto.precio} soles\n` +
         `Código: ${producto.codigo}`;
+
+      // Creamos el mismo tipo de payload que en las promociones
+      const payload = {
+        messaging_product: 'whatsapp',
+        recipient_type: 'individual',
+        to: to,
+        type: 'interactive',
+        interactive: {
+          type: 'button',
+          header: {
+            type: 'image',
+            image: { link: producto.imagen }
+          },
+          body: {
+            text: detallesProducto
+          },
+          action: {
+            buttons: [
+              {
+                type: 'reply',
+                reply: {
+                  id: `COMPRAR_PRODUCTO_${producto.codigo}`,
+                  title: '🛍️ Comprar'
+                }
+              }
+            ]
+          }
+        }
+      };
       
-      await enviarMensajeConBotonComprar(to, detallesProducto);
+      await axios.post(
+        `https://graph.facebook.com/v18.0/${phoneNumberId}/messages`,
+        payload,
+        { headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` } }
+      );
+      
+      // Añadimos una pequeña pausa opcional para no saturar al usuario
+      await new Promise(resolve => setTimeout(resolve, 1000));
     }
     
   } catch (error) {
