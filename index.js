@@ -206,6 +206,7 @@ async function enviarMenuPrincipal(to) {
       `https://graph.facebook.com/v18.0/${phoneNumberId}/messages`,
       {
         messaging_product: 'whatsapp',
+        recipient_type: 'individual', // AÑADIDO
         to,
         type: 'interactive',
         interactive: {
@@ -235,6 +236,7 @@ async function enviarSubmenuTipoReloj(to, genero) {
       `https://graph.facebook.com/v18.0/${phoneNumberId}/messages`,
       {
         messaging_product: 'whatsapp',
+        recipient_type: 'individual', // AÑADIDO
         to,
         type: 'interactive',
         interactive: {
@@ -255,7 +257,7 @@ async function enviarSubmenuTipoReloj(to, genero) {
   }
 }
 
-// ✅✅✅ --- FUNCIÓN CORREGIDA Y MEJORADA --- ✅✅✅
+// ✅✅✅ --- FUNCIÓN CORREGIDA --- ✅✅✅
 async function enviarCatalogo(to, tipo) {
   try {
     const productos = data[tipo];
@@ -271,11 +273,11 @@ async function enviarCatalogo(to, tipo) {
         `💲 ${producto.precio} soles\n` +
         `Código: ${producto.codigo}`;
 
-      // Usamos un solo mensaje interactivo con cabecera de imagen para cada producto
       await axios.post(
         `https://graph.facebook.com/v18.0/${phoneNumberId}/messages`,
         {
           messaging_product: 'whatsapp',
+          recipient_type: 'individual', // AÑADIDO
           to,
           type: 'interactive',
           interactive: {
@@ -432,6 +434,7 @@ async function enviarInfoPromo(to, producto) {
         `https://graph.facebook.com/v18.0/${phoneNumberId}/messages`,
         {
           messaging_product: 'whatsapp',
+          recipient_type: 'individual', // AÑADIDO
           to,
           type: 'image',
           image: { link: promo.imagen, caption: `${promo.descripcion}` }
@@ -467,6 +470,7 @@ async function enviarMensajeConBotonSalir(to, text) {
       `https://graph.facebook.com/v18.0/${phoneNumberId}/messages`,
       {
         messaging_product: 'whatsapp',
+        recipient_type: 'individual', // AÑADIDO
         to,
         type: 'interactive',
         interactive: {
@@ -489,6 +493,7 @@ async function enviarMensajeConBotonComprar(to, text) {
       `https://graph.facebook.com/v18.0/${phoneNumberId}/messages`,
       {
         messaging_product: 'whatsapp',
+        recipient_type: 'individual', // AÑADIDO
         to,
         type: 'interactive',
         interactive: {
@@ -511,6 +516,7 @@ async function enviarPreguntaUbicacion(senderId) {
       `https://graph.facebook.com/v18.0/${phoneNumberId}/messages`,
       {
         messaging_product: 'whatsapp',
+        recipient_type: 'individual', // AÑADIDO
         to: senderId,
         type: 'interactive',
         interactive: {
