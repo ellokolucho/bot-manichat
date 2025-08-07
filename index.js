@@ -72,6 +72,7 @@ async function finalizarSesion(senderId) {
     delete estadoUsuario[senderId];
     delete memoriaConversacion[senderId];
     delete contadorMensajesAsesor[senderId];
+    delete primerMensaje[senderId]; // Limpiamos el estado al finalizar
 
     await enviarMensajeTexto(senderId, "⏳ Tu sesión ha terminado. ¡Gracias por visitar Tiendas Megan!");
   } catch (error) {
@@ -98,12 +99,12 @@ app.post('/webhook', async (req, res) => {
 
     reiniciarTimerInactividad(from);
 
-    // --- MANEJO DE BOTONES (CON CAMBIOS) ---
+    // --- MANEJO DE BOTONES ---
     if (type === 'interactive' && message.interactive?.button_reply?.id) {
+      primerMensaje[from] = true; // Un clic en un botón cuenta como primera interacción
       const buttonId = message.interactive.button_reply.id;
 
-      // Maneja los botones de compra de las promociones
-      if (buttonId.startsWith('COMPRAR_PRODUCTO_')) {
+      if (buttonId.startsWith('COMPRAR_PRODUCTO')) { // Maneja todos los botones de compra
           await enviarPreguntaUbicacion(from);
           return res.sendStatus(200);
       }
@@ -155,7 +156,7 @@ app.post('/webhook', async (req, res) => {
       return res.sendStatus(200);
     }
 
-    // --- LÓGICA PARA MENSAJES DE TEXTO (CON CAMBIOS) ---
+    // --- LÓGICA PARA MENSAJES DE TEXTO ---
     if (type === 'text') {
       const text = message.text.body;
       const mensaje = text.trim().toLowerCase();
@@ -180,15 +181,17 @@ app.post('/webhook', async (req, res) => {
       
       // Disparadores de promociones
       if (mensaje.includes('me interesa este reloj exclusivo')) {
+          primerMensaje[from] = true; // La promo cuenta como primera interacción
           await enviarInfoPromo(from, promoData.reloj1);
           return res.sendStatus(200);
       }
       if (mensaje.includes('me interesa este reloj de lujo')) {
+          primerMensaje[from] = true; // La promo cuenta como primera interacción
           await enviarInfoPromo(from, promoData.reloj2);
           return res.sendStatus(200);
       }
 
-      // PRIORIDAD 2: Comandos específicos (ej. "gracias")
+      // PRIORIDAD 2: Comandos específicos
       if (/^(gracias|muchas gracias|mil gracias)$/i.test(mensaje)) {
         await enviarMensajeTexto(from, "😄 ¡De nada! Estamos para servirle.");
         return res.sendStatus(200);
@@ -196,9 +199,11 @@ app.post('/webhook', async (req, res) => {
 
       // PRIORIDAD 3: Lógica por defecto (Primera interacción vs. ChatGPT)
       if (primerMensaje[from]) {
+        // Si ya ha habido una interacción, cualquier texto libre va a ChatGPT
         await enviarConsultaChatGPT(from, text);
       } else {
-        primerMensaje[from] = true;
+        // Si es la primera interacción del usuario, le mostramos el menú principal
+        primerMensaje[from] = true; // Marcamos que ya tuvimos la primera interacción
         await enviarMenuPrincipal(from);
       }
       return res.sendStatus(200);
@@ -233,7 +238,7 @@ async function enviarMenuPrincipal(to) {
       { headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` } }
     );
   } catch (error) {
-    console.error('❌ Error enviando menú principal:', JSON.stringify(error.response.data));
+    console.error('❌ Error enviando menú principal:', JSON.stringify(error.response?.data || error.message));
   }
 }
 
@@ -262,7 +267,7 @@ async function enviarSubmenuTipoReloj(to, genero) {
       { headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` } }
     );
   } catch (error) {
-    console.error('❌ Error enviando submenu:', JSON.stringify(error.response.data));
+    console.error('❌ Error enviando submenu:', JSON.stringify(error.response?.data || error.message));
   }
 }
 
@@ -420,9 +425,8 @@ async function manejarFlujoCompra(senderId, mensaje) {
   }
 }
 
-// ===== FUNCIÓN MEJORADA PARA LAS PROMOCIONES =====
+// Envía promociones e info de producto
 async function enviarInfoPromo(to, producto) {
-  // 1. VERIFICACIÓN DE DATOS: Nos aseguramos de que el producto exista antes de continuar.
   if (!producto || !producto.nombre) {
     console.error('❌ Se intentó enviar una promo con datos inválidos o faltantes. Revisa tu promoData.json.');
     await enviarMensajeTexto(to, '⚠️ Lo siento, no pude encontrar los detalles de esa promoción en este momento.');
@@ -430,7 +434,6 @@ async function enviarInfoPromo(to, producto) {
   }
 
   try {
-    // 2. CONSTRUCCIÓN DEL MENSAJE (sin cambios)
     const detallesProducto =
       `*${producto.nombre}*\n` +
       `${producto.descripcion}\n` +
@@ -471,7 +474,6 @@ async function enviarInfoPromo(to, producto) {
       }
     };
 
-    // 3. ENVÍO DEL MENSAJE (sin cambios)
     await axios.post(
       `https://graph.facebook.com/v18.0/${phoneNumberId}/messages`,
       payload,
@@ -479,7 +481,6 @@ async function enviarInfoPromo(to, producto) {
     );
 
   } catch (error) {
-    // 4. MANEJO DE ERRORES CORREGIDO
     console.error(`❌ Error enviando promo para "${producto.nombre}":`, error.response ? JSON.stringify(error.response.data) : error.message);
     await enviarMensajeTexto(to, '⚠️ Lo siento, hubo un problema al mostrar esa promoción.');
   }
@@ -494,7 +495,7 @@ async function enviarMensajeTexto(to, text) {
       { headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` } }
     );
   } catch (error) {
-    console.error('❌ Error enviando mensaje de texto:', JSON.stringify(error.response.data));
+    console.error('❌ Error enviando mensaje de texto:', JSON.stringify(error.response?.data || error.message));
   }
 }
 
@@ -517,7 +518,7 @@ async function enviarMensajeConBotonSalir(to, text) {
       { headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` } }
     );
   } catch (error) {
-    console.error('❌ Error enviando botón salir:', JSON.stringify(error.response.data));
+    console.error('❌ Error enviando botón salir:', JSON.stringify(error.response?.data || error.message));
   }
 }
 
@@ -534,13 +535,13 @@ async function enviarMensajeConBotonComprar(to, text) {
         interactive: {
           type: 'button',
           body: { text },
-          action: { buttons: [{ type: 'reply', reply: { id: `COMPRAR_PRODUCTO_`, title: '🛍️ Comprar' } }] }
+          action: { buttons: [{ type: 'reply', reply: { id: `COMPRAR_PRODUCTO`, title: '🛍️ Comprar' } }] }
         }
       },
       { headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` } }
     );
   } catch (error) {
-    console.error('❌ Error enviando botón de comprar:', JSON.stringify(error.response.data));
+    console.error('❌ Error enviando botón de comprar:', JSON.stringify(error.response?.data || error.message));
   }
 }
 
@@ -568,7 +569,7 @@ async function enviarPreguntaUbicacion(senderId) {
       { headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` } }
     );
   } catch (error) {
-    console.error('❌ Error enviando pregunta de ubicación:', JSON.stringify(error.response.data));
+    console.error('❌ Error enviando pregunta de ubicación:', JSON.stringify(error.response?.data || error.message));
   }
 }
 
