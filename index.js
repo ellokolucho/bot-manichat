@@ -1,3 +1,4 @@
+
 const express = require('express');
 const bodyParser = require('body-parser');
 const axios = require('axios');
@@ -50,16 +51,23 @@ app.post('/webhook', async (req, res) => {
     // Botones interactivos
     if (type === 'interactive' && message.interactive?.button_reply?.id) {
       const id = message.interactive.button_reply.id;
+      console.log('🛠 Acción interactiva recibida:', id);
       switch (id) {
         case 'CABALLEROS':
         case 'DAMAS':
           await enviarSubmenuTipoReloj(from, id);
           break;
         case 'CABALLEROS_AUTO':
-        case 'DAMAS_AUTO':
+          await enviarCatalogo(from, 'caballeros_automaticos');
+          break;
         case 'CABALLEROS_CUARZO':
+          await enviarCatalogo(from, 'caballeros_cuarzo');
+          break;
+        case 'DAMAS_AUTO':
+          await enviarCatalogo(from, 'damas_automaticos');
+          break;
         case 'DAMAS_CUARZO':
-          await enviarCatalogo(from, id.toLowerCase());
+          await enviarCatalogo(from, 'damas_cuarzo');
           break;
         case 'ASESOR':
           await enviarConsultaChatGPT(from, '');
@@ -136,16 +144,16 @@ async function enviarSubmenuTipoReloj(to, genero) {
   }
 }
 
-// Envío de catálogo con mapeo auto->automaticos
-async function enviarCatalogo(to, tipo) {
+// Envío de catálogo
+async function enviarCatalogo(to, key) {
   try {
-    let key = tipo;
-    if (key.endsWith('_auto')) key = key.replace('_auto', '_automaticos');
+    console.log(`🔎 enviarCatalogo: key='${key}', productos disponibles=`, data[key]?.length);
     const productos = data[key];
     if (!productos || productos.length === 0) {
       return enviarMensajeTexto(to, '😔 Lo siento, no hay productos disponibles para esa categoría.');
     }
     for (const p of productos) {
+      console.log('📤 Enviando producto:', p.codigo);
       await axios.post(
         `https://graph.facebook.com/v18.0/${phoneNumberId}/messages`,
         {
@@ -153,11 +161,7 @@ async function enviarCatalogo(to, tipo) {
           to,
           type: 'image',
           image: { link: p.imagen },
-          caption:
-            `*${p.nombre}*\n` +
-            `${p.descripcion}\n` +
-            `💲 ${p.precio} soles\n` +
-            `Código: ${p.codigo}`
+          caption: `*${p.nombre}*\n${p.descripcion}\n💲 ${p.precio} soles\nCódigo: ${p.codigo}`
         },
         { headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` } }
       );
@@ -168,24 +172,27 @@ async function enviarCatalogo(to, tipo) {
   }
 }
 
-// Llamada a ChatGPT con axios
+// Lógica de ChatGPT con memoria y triggers
 async function enviarConsultaChatGPT(user, mensaje) {
   try {
     if (!memoriaConversacion[user]) memoriaConversacion[user] = [];
     memoriaConversacion[user].push({ role: 'user', content: mensaje });
     contadorMensajesAsesor[user] = (contadorMensajesAsesor[user] || 0) + 1;
+
     const contexto = [
       { role: 'system', content: `${systemPrompt}\nDatos catálogo: ${JSON.stringify(data)}` },
       ...memoriaConversacion[user]
     ];
+
     const resp = await axios.post(
       'https://api.openai.com/v1/chat/completions',
       { model: 'gpt-4o', messages: contexto },
       { headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}`, 'Content-Type': 'application/json' } }
     );
+
     const texto = resp.data.choices[0].message.content.trim();
     memoriaConversacion[user].push({ role: 'assistant', content: texto });
-    // Triggers
+
     if (texto.startsWith('MOSTRAR_MODELO:')) {
       const code = texto.split(':')[1].trim();
       const prod = Object.values(data).flat().find(x => x.codigo === code);
