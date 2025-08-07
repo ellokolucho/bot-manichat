@@ -206,6 +206,7 @@ async function enviarMenuPrincipal(to) {
       `https://graph.facebook.com/v18.0/${phoneNumberId}/messages`,
       {
         messaging_product: 'whatsapp',
+        recipient_type: 'individual',
         to,
         type: 'interactive',
         interactive: {
@@ -235,6 +236,7 @@ async function enviarSubmenuTipoReloj(to, genero) {
       `https://graph.facebook.com/v18.0/${phoneNumberId}/messages`,
       {
         messaging_product: 'whatsapp',
+        recipient_type: 'individual',
         to,
         type: 'interactive',
         interactive: {
@@ -265,33 +267,28 @@ async function enviarCatalogo(to, tipo) {
     }
 
     for (const producto of productos) {
-      // 1. Construimos el texto del cuerpo del mensaje
       const detallesProducto =
         `*${producto.nombre}*\n` +
         `${producto.descripcion}\n` +
         `💲 ${producto.precio} soles\n` +
         `Código: ${producto.codigo}`;
 
-      // 2. Creamos el payload para un único mensaje interactivo que incluye todo
       const payload = {
         messaging_product: 'whatsapp',
-        recipient_type: 'individual', // Campo añadido para máxima compatibilidad
+        recipient_type: 'individual',
         to: to,
         type: 'interactive',
         interactive: {
           type: 'button',
-          // La imagen va en la cabecera (header)
           header: {
             type: 'image',
             image: {
               link: producto.imagen
             }
           },
-          // El texto va en el cuerpo (body)
           body: {
             text: detallesProducto
           },
-          // El botón va en la acción (action)
           action: {
             buttons: [
               {
@@ -306,7 +303,6 @@ async function enviarCatalogo(to, tipo) {
         }
       };
       
-      // 3. Enviamos la petición a la API de Meta
       await axios.post(
         `https://graph.facebook.com/v18.0/${phoneNumberId}/messages`,
         payload,
@@ -314,7 +310,6 @@ async function enviarCatalogo(to, tipo) {
       );
     }
   } catch (error) {
-    // Log de errores mejorado para poder diagnosticar si algo sigue fallando
     console.error(`❌ Error fatal en enviarCatalogo para el tipo "${tipo}":`, error.message);
     if (error.response) {
       console.error('❌ Datos del error de la API de Meta:', JSON.stringify(error.response.data, null, 2));
@@ -474,6 +469,7 @@ async function enviarMensajeConBotonSalir(to, text) {
       `https://graph.facebook.com/v18.0/${phoneNumberId}/messages`,
       {
         messaging_product: 'whatsapp',
+        recipient_type: 'individual',
         to,
         type: 'interactive',
         interactive: {
@@ -496,6 +492,7 @@ async function enviarMensajeConBotonComprar(to, text) {
       `https://graph.facebook.com/v18.0/${phoneNumberId}/messages`,
       {
         messaging_product: 'whatsapp',
+        recipient_type: 'individual',
         to,
         type: 'interactive',
         interactive: {
@@ -518,6 +515,7 @@ async function enviarPreguntaUbicacion(senderId) {
       `https://graph.facebook.com/v18.0/${phoneNumberId}/messages`,
       {
         messaging_product: 'whatsapp',
+        recipient_type: 'individual',
         to: senderId,
         type: 'interactive',
         interactive: {
