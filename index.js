@@ -35,11 +35,11 @@ let contadorMensajesAsesor = {}; // ✅ NUEVO: Contador de mensajes por asesorí
 // 🌐 WEBHOOK
 app.get('/webhook', (req, res) => {
   const mode = req.query['hub.mode'];
-  const token = req.query['hub.verify_token'];
+  const WHATSAPP_TOKEN = req.query['hub.verify_WHATSAPP_TOKEN'];
   const challenge = req.query['hub.challenge'];
 
-  if (mode && token) {
-    if (mode === 'subscribe' && token === VERIFY_TOKEN) {
+  if (mode && WHATSAPP_TOKEN) {
+    if (mode === 'subscribe' && WHATSAPP_TOKEN === VERIFY_TOKEN) {
       console.log('✅ Webhook verificado correctamente');
       res.status(200).send(challenge);
     } else {
@@ -345,14 +345,14 @@ if (!avisoEnviado[from]) {
 // 🔹 ENVIAR MENSAJE TEXTO (adaptado para WhatsApp)
 async function enviarMensajeTexto(to, text) {
   try {
-    await axios.post(`https://graph.facebook.com/v18.0/${phoneNumberId}/messages`, {
+    await axios.post(`https://graph.facebook.com/v18.0/${PHONE_NUMBER_ID}/messages`, {
       messaging_product: "whatsapp",
       to,
       text: { body: text }
     }, {
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`
+        Authorization: `Bearer ${WHATSAPP_TOKEN}`
       }
     });
   } catch (error) {
@@ -371,7 +371,7 @@ async function enviarMensajeConBotonSalir(to, text) {
     }
 
     // ✅ Después de 6 interacciones, enviamos un botón para volver al inicio
-    await axios.post(`https://graph.facebook.com/v18.0/${phoneNumberId}/messages`, {
+    await axios.post(`https://graph.facebook.com/v18.0/${PHONE_NUMBER_ID}/messages`, {
       messaging_product: "whatsapp",
       to,
       type: "interactive",
@@ -393,7 +393,7 @@ async function enviarMensajeConBotonSalir(to, text) {
     }, {
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`
+        Authorization: `Bearer ${WHATSAPP_TOKEN}`
       }
     });
   } catch (error) {
@@ -406,7 +406,7 @@ async function enviarMensajeConBotonSalir(to, text) {
 async function enviarInfoPromo(to, producto) {
   try {
     // 1️⃣ Enviar la imagen del producto
-    await axios.post(`https://graph.facebook.com/v18.0/${phoneNumberId}/messages`, {
+    await axios.post(`https://graph.facebook.com/v18.0/${PHONE_NUMBER_ID}/messages`, {
       messaging_product: "whatsapp",
       to,
       type: "image",
@@ -414,12 +414,12 @@ async function enviarInfoPromo(to, producto) {
     }, {
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`
+        Authorization: `Bearer ${WHATSAPP_TOKEN}`
       }
     });
 
     // 2️⃣ Enviar mensaje con botones
-    await axios.post(`https://graph.facebook.com/v18.0/${phoneNumberId}/messages`, {
+    await axios.post(`https://graph.facebook.com/v18.0/${PHONE_NUMBER_ID}/messages`, {
       messaging_product: "whatsapp",
       to,
       type: "interactive",
@@ -457,7 +457,7 @@ async function enviarInfoPromo(to, producto) {
     }, {
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`
+        Authorization: `Bearer ${WHATSAPP_TOKEN}`
       }
     });
 
@@ -469,7 +469,7 @@ async function enviarInfoPromo(to, producto) {
 // 🔹 ENVIAR MENÚ PRINCIPAL (adaptado a WhatsApp)
 async function enviarMenuPrincipal(to) {
   try {
-    await axios.post(`https://graph.facebook.com/v18.0/${phoneNumberId}/messages`, {
+    await axios.post(`https://graph.facebook.com/v18.0/${PHONE_NUMBER_ID}/messages`, {
       messaging_product: "whatsapp",
       to,
       type: "interactive",
@@ -507,7 +507,7 @@ async function enviarMenuPrincipal(to) {
     }, {
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`
+        Authorization: `Bearer ${WHATSAPP_TOKEN}`
       }
     });
   } catch (error) {
@@ -526,7 +526,7 @@ async function enviarSubmenuTipoReloj(to, genero) {
   let payloadCuarzo = genero === "CABALLEROS" ? "CABALLEROS_CUARZO" : "DAMAS_CUARZO";
 
   try {
-    await axios.post(`https://graph.facebook.com/v18.0/${phoneNumberId}/messages`, {
+    await axios.post(`https://graph.facebook.com/v18.0/${PHONE_NUMBER_ID}/messages`, {
       messaging_product: "whatsapp",
       to,
       type: "interactive",
@@ -555,7 +555,7 @@ async function enviarSubmenuTipoReloj(to, genero) {
     }, {
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`
+        Authorization: `Bearer ${WHATSAPP_TOKEN}`
       }
     });
   } catch (error) {
@@ -576,7 +576,7 @@ async function enviarCatalogo(to, categoria) {
 
     for (let producto of listaProductos) {
       // 1️⃣ Enviar imagen
-      await axios.post(`https://graph.facebook.com/v18.0/${phoneNumberId}/messages`, {
+      await axios.post(`https://graph.facebook.com/v18.0/${PHONE_NUMBER_ID}/messages`, {
         messaging_product: "whatsapp",
         to,
         type: "image",
@@ -586,12 +586,12 @@ async function enviarCatalogo(to, categoria) {
       }, {
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`
+          Authorization: `Bearer ${WHATSAPP_TOKEN}`
         }
       });
 
       // 2️⃣ Enviar texto + botones
-      await axios.post(`https://graph.facebook.com/v18.0/${phoneNumberId}/messages`, {
+      await axios.post(`https://graph.facebook.com/v18.0/${PHONE_NUMBER_ID}/messages`, {
         messaging_product: "whatsapp",
         to,
         type: "interactive",
@@ -629,7 +629,7 @@ async function enviarCatalogo(to, categoria) {
       }, {
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`
+          Authorization: `Bearer ${WHATSAPP_TOKEN}`
         }
       });
     }
@@ -641,7 +641,7 @@ async function enviarCatalogo(to, categoria) {
 // 🔹 PREGUNTAR LIMA O PROVINCIA (adaptado para WhatsApp)
 async function enviarPreguntaUbicacion(to) {
   try {
-    await axios.post(`https://graph.facebook.com/v18.0/${phoneNumberId}/messages`, {
+    await axios.post(`https://graph.facebook.com/v18.0/${PHONE_NUMBER_ID}/messages`, {
       messaging_product: "whatsapp",
       to,
       type: "interactive",
@@ -672,7 +672,7 @@ async function enviarPreguntaUbicacion(to) {
     }, {
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`
+        Authorization: `Bearer ${WHATSAPP_TOKEN}`
       }
     });
   } catch (error) {
@@ -710,7 +710,7 @@ function limpiarTimers(senderId) {
 }
 async function enviarBotonWhatsApp(to) {
   try {
-    await axios.post(`https://graph.facebook.com/v18.0/${phoneNumberId}/messages`, {
+    await axios.post(`https://graph.facebook.com/v18.0/${PHONE_NUMBER_ID}/messages`, {
       messaging_product: "whatsapp",
       to,
       type: "interactive",
@@ -741,7 +741,7 @@ async function enviarBotonWhatsApp(to) {
     }, {
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`
+        Authorization: `Bearer ${WHATSAPP_TOKEN}`
       }
     });
   } catch (error) {
@@ -752,7 +752,7 @@ async function enviarBotonWhatsApp(to) {
 
 async function enviarBotonWhatsApp(to) {
   try {
-    await axios.post(`https://graph.facebook.com/v18.0/${phoneNumberId}/messages`, {
+    await axios.post(`https://graph.facebook.com/v18.0/${PHONE_NUMBER_ID}/messages`, {
       messaging_product: "whatsapp",
       to,
       type: "interactive",
@@ -783,7 +783,7 @@ async function enviarBotonWhatsApp(to) {
     }, {
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`
+        Authorization: `Bearer ${WHATSAPP_TOKEN}`
       }
     });
   } catch (error) {
