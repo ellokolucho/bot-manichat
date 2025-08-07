@@ -139,7 +139,6 @@ app.post('/webhook', async (req, res) => {
           estadoUsuario[from] = 'ESPERANDO_DATOS_PROVINCIA';
           await enviarMensajeTexto(from, "😊 Claro que sí. Por favor, permítanos los siguientes datos para programar su pedido:\n\n✅ Nombre completo ✍️\n✅ DNI 🪪\n✅ Número de WhatsApp 📱\n✅ Agencia Shalom que le queda más cerca 🚚");
           break;
-        // 🆕 Nuevo caso para el botón "Comprar"
         case 'COMPRAR_PRODUCTO':
           await enviarPreguntaUbicacion(from);
           break;
