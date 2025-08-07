@@ -2,6 +2,7 @@
 const express = require('express');
 const bodyParser = require('body-parser');
 const axios = require('axios');
+const fs = require('fs');
 require('dotenv').config();
 
 const app = express();
@@ -9,6 +10,9 @@ app.use(bodyParser.json());
 
 const token = process.env.WHATSAPP_TOKEN;
 const phoneNumberId = process.env.PHONE_NUMBER_ID;
+
+// 🔹 Cargar catálogo desde archivo local
+const data = JSON.parse(fs.readFileSync('./data.json', 'utf-8'));
 
 app.get('/webhook', (req, res) => {
   const verifyToken = process.env.VERIFY_TOKEN;
@@ -98,27 +102,9 @@ async function enviarMenuPrincipal(to) {
         },
         action: {
           buttons: [
-            {
-              type: "reply",
-              reply: {
-                id: "CABALLEROS",
-                title: "⌚ Para Caballeros"
-              }
-            },
-            {
-              type: "reply",
-              reply: {
-                id: "DAMAS",
-                title: "🕒 Para Damas"
-              }
-            },
-            {
-              type: "reply",
-              reply: {
-                id: "ASESOR",
-                title: "💬 Hablar con Asesor"
-              }
-            }
+            { type: "reply", reply: { id: "CABALLEROS", title: "⌚ Para Caballeros" } },
+            { type: "reply", reply: { id: "DAMAS", title: "🕒 Para Damas" } },
+            { type: "reply", reply: { id: "ASESOR", title: "💬 Hablar con Asesor" } }
           ]
         }
       }
@@ -135,7 +121,6 @@ async function enviarMenuPrincipal(to) {
 
 async function enviarSubmenuTipoReloj(to, genero) {
   const generoMayus = genero.toUpperCase();
-  const isCaballero = generoMayus === "CABALLEROS";
 
   try {
     await axios.post(`https://graph.facebook.com/v18.0/${phoneNumberId}/messages`, {
@@ -149,20 +134,8 @@ async function enviarSubmenuTipoReloj(to, genero) {
         },
         action: {
           buttons: [
-            {
-              type: "reply",
-              reply: {
-                id: `${generoMayus}_AUTO`,
-                title: "⛓ Automáticos"
-              }
-            },
-            {
-              type: "reply",
-              reply: {
-                id: `${generoMayus}_CUARZO`,
-                title: "⚙ Cuarzo"
-              }
-            }
+            { type: "reply", reply: { id: `${generoMayus}_AUTO`, title: "⛓ Automáticos" } },
+            { type: "reply", reply: { id: `${generoMayus}_CUARZO`, title: "⚙ Cuarzo" } }
           ]
         }
       }
@@ -178,12 +151,28 @@ async function enviarSubmenuTipoReloj(to, genero) {
 }
 
 async function enviarCatalogo(to, tipo) {
+  const productos = data[tipo] || [];
+
+  if (productos.length === 0) {
+    return enviarMensajeTexto(to, "📭 No hay productos disponibles en esta categoría.");
+  }
+
+  for (const reloj of productos) {
+    await enviarProductoWhatsApp(to, reloj);
+  }
+}
+
+async function enviarProductoWhatsApp(to, producto) {
   try {
     await axios.post(`https://graph.facebook.com/v18.0/${phoneNumberId}/messages`, {
       messaging_product: "whatsapp",
       to,
-      text: {
-        body: `📄 Aquí tienes el catálogo para: ${tipo.replace('_', ' ')}`
+      type: "image",
+      image: {
+        link: producto.imagen,
+        caption: `📌 ${producto.nombre}
+${producto.descripcion}
+💵 S/. ${producto.precio}`
       }
     }, {
       headers: {
@@ -192,27 +181,12 @@ async function enviarCatalogo(to, tipo) {
       }
     });
   } catch (error) {
-    console.error('❌ Error enviando catálogo:', error.response?.data || error.message);
+    console.error('❌ Error enviando imagen de producto:', error.response?.data || error.message);
   }
 }
 
 async function enviarMensajeAsesor(to) {
-  try {
-    await axios.post(`https://graph.facebook.com/v18.0/${phoneNumberId}/messages`, {
-      messaging_product: "whatsapp",
-      to,
-      text: {
-        body: "💬 Un asesor está disponible para ayudarte. En breve te contactaremos."
-      }
-    }, {
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`
-      }
-    });
-  } catch (error) {
-    console.error('❌ Error enviando mensaje al asesor:', error.response?.data || error.message);
-  }
+  await enviarMensajeTexto(to, "💬 Un asesor está disponible para ayudarte. En breve te contactaremos.");
 }
 
 async function enviarMensajeTexto(to, text) {
