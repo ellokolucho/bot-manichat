@@ -255,47 +255,71 @@ async function enviarSubmenuTipoReloj(to, genero) {
   }
 }
 
-// ✅✅✅ --- FUNCIÓN CORREGIDA --- ✅✅✅
+// ✅✅✅ --- FUNCIÓN CORREGIDA Y DEFINITIVA --- ✅✅✅
 async function enviarCatalogo(to, tipo) {
   try {
     const productos = data[tipo];
-    if (!productos || productos.length === 0) {
+    if (!productos || !productos.length) {
       await enviarMensajeTexto(to, '😔 Lo siento, no hay productos disponibles para esa categoría.');
       return;
     }
-    
-    // Recorremos y enviamos cada producto por separado
-    for (const producto of productos) {
-      // PASO 1: Enviar la imagen del producto.
-      await axios.post(
-        `https://graph.facebook.com/v18.0/${phoneNumberId}/messages`,
-        {
-          messaging_product: 'whatsapp',
-          to,
-          type: 'image',
-          image: { link: producto.imagen }
-        },
-        { headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` } }
-      );
 
-      // PASO 2: Enviar un segundo mensaje con los detalles y el botón de compra.
+    for (const producto of productos) {
+      // 1. Construimos el texto del cuerpo del mensaje
       const detallesProducto =
         `*${producto.nombre}*\n` +
         `${producto.descripcion}\n` +
         `💲 ${producto.precio} soles\n` +
         `Código: ${producto.codigo}`;
+
+      // 2. Creamos el payload para un único mensaje interactivo que incluye todo
+      const payload = {
+        messaging_product: 'whatsapp',
+        recipient_type: 'individual', // Campo añadido para máxima compatibilidad
+        to: to,
+        type: 'interactive',
+        interactive: {
+          type: 'button',
+          // La imagen va en la cabecera (header)
+          header: {
+            type: 'image',
+            image: {
+              link: producto.imagen
+            }
+          },
+          // El texto va en el cuerpo (body)
+          body: {
+            text: detallesProducto
+          },
+          // El botón va en la acción (action)
+          action: {
+            buttons: [
+              {
+                type: 'reply',
+                reply: {
+                  id: 'COMPRAR_PRODUCTO',
+                  title: '🛍️ Comprar'
+                }
+              }
+            ]
+          }
+        }
+      };
       
-      // Reutilizamos la función existente para enviar texto con botón
-      await enviarMensajeConBotonComprar(to, detallesProducto);
+      // 3. Enviamos la petición a la API de Meta
+      await axios.post(
+        `https://graph.facebook.com/v18.0/${phoneNumberId}/messages`,
+        payload,
+        { headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` } }
+      );
     }
-    
   } catch (error) {
+    // Log de errores mejorado para poder diagnosticar si algo sigue fallando
+    console.error(`❌ Error fatal en enviarCatalogo para el tipo "${tipo}":`, error.message);
     if (error.response) {
-      console.error('❌ Error enviando catálogo (data):', JSON.stringify(error.response.data, null, 2));
-    } else {
-      console.error('❌ Error enviando catálogo (message):', error.message);
+      console.error('❌ Datos del error de la API de Meta:', JSON.stringify(error.response.data, null, 2));
     }
-    await enviarMensajeTexto(to, '⚠️ Tuvimos un problema al mostrar el catálogo. Por favor, intenta de nuevo.');
+    await enviarMensajeTexto(to, '⚠️ Tuvimos un problema al mostrar el catálogo. Por favor, intenta de nuevo más tarde.');
   }
 }
 
