@@ -90,6 +90,7 @@ async function enviarAvisoInactividad(senderId) {
 }
 
 app.post('/webhook', async (req, res) => {
+  console.log("📩 Webhook recibido:", JSON.stringify(req.body, null, 2));
   const body = req.body;
 
   if (body.object === 'whatsapp_business_account') {
@@ -125,7 +126,7 @@ app.post('/webhook', async (req, res) => {
         delete memoriaConversacion[senderId];
         delete contadorMensajesAsesor[senderId];
         await enviarMensajeTexto(senderId, "🚪 Has salido del chat con asesor. Volviendo al menú principal...");
-        await enviarMenuPrincipal(senderId);
+        await enviarMensajeTexto(senderId, "👋 ¡Hola! ¿En qué puedo ayudarte hoy?");
         return res.sendStatus(200);
       }
 
@@ -145,12 +146,12 @@ app.post('/webhook', async (req, res) => {
     }
 
     if (mensajeTexto.includes("ver otros modelos")) {
-      await enviarMenuPrincipal(senderId);
+      await enviarMensajeTexto(senderId, "👋 ¡Hola! ¿En qué puedo ayudarte hoy?");
       return res.sendStatus(200);
     }
 
     if (mensajeTexto.includes("hola")) {
-      await enviarMenuPrincipal(senderId);
+      await enviarMensajeTexto(senderId, "👋 ¡Hola! ¿En qué puedo ayudarte hoy?");
       return res.sendStatus(200);
     }
 
