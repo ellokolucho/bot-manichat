@@ -26,7 +26,7 @@ const PORT = process.env.PORT || 3000;
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const client = new OpenAI({ apiKey: OPENAI_API_KEY });
 
-// Endpoint de verificación del webhook (WhatsApp)
+// Endpoint de verificación del webhook
 app.get('/webhook', (req, res) => {
   const verifyToken = process.env.VERIFY_TOKEN;
   const mode = req.query['hub.mode'];
@@ -79,7 +79,8 @@ async function finalizarSesion(senderId) {
   }
 }
 
-// Recepción de mensajes y flujos interactivos (Webhook de WhatsApp)
+
+// Recepción de mensajes y flujos interactivos
 app.post('/webhook', async (req, res) => {
   console.log('📩 Webhook recibido:', JSON.stringify(req.body, null, 2));
   const body = req.body;
@@ -198,7 +199,7 @@ app.post('/webhook', async (req, res) => {
   res.sendStatus(200);
 });
 
-// Inicia conversación principal (Menú con botones de respuesta)
+// Inicia conversación principal
 async function enviarMenuPrincipal(to) {
   try {
     await axios.post(
