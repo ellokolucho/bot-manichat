@@ -257,7 +257,7 @@ async function enviarSubmenuTipoReloj(to, genero) {
   }
 }
 
-// ✅✅✅ --- FUNCIÓN CORREGIDA Y ROBUSTA --- ✅✅✅
+// ✅✅✅ --- FUNCIÓN CON PAUSA AÑADIDA --- ✅✅✅
 async function enviarCatalogo(to, tipo) {
   try {
     const productos = data[tipo];
@@ -266,11 +266,9 @@ async function enviarCatalogo(to, tipo) {
       return;
     }
 
-    // Recorremos cada producto para enviarlo
     for (const producto of productos) {
-      
-      // --- PASO 1: INTENTAR ENVIAR LA IMAGEN (CON CONTROL DE ERRORES) ---
       try {
+        // PASO 1: Enviar la imagen
         await axios.post(
           `https://graph.facebook.com/v18.0/${phoneNumberId}/messages`,
           {
@@ -282,26 +280,26 @@ async function enviarCatalogo(to, tipo) {
           },
           { headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` } }
         );
+
+        // Añadimos una pausa de 1.5 segundos (1500 milisegundos)
+        await new Promise(resolve => setTimeout(resolve, 1500)); 
+
       } catch (imageError) {
-        // Si la imagen falla, lo registramos y notificamos, pero NO detenemos el flujo.
         console.error(`❌ Fallo al enviar imagen para producto ${producto.codigo}:`, imageError.response ? JSON.stringify(imageError.response.data) : imageError.message);
         await enviarMensajeTexto(to, `⚠️ No se pudo cargar la imagen para *${producto.nombre}*.`);
       }
 
-      // --- PASO 2: ENVIAR LOS DETALLES Y EL BOTÓN (ESTO SÍ FUNCIONA) ---
-      // Este bloque se ejecutará siempre, incluso si la imagen falló.
+      // PASO 2: Enviar el texto y botón
       const detallesProducto =
         `*${producto.nombre}*\n` +
         `${producto.descripcion}\n` +
         `💲 ${producto.precio} soles\n` +
         `Código: ${producto.codigo}`;
       
-      // Usamos la función que ya sabemos que funciona para enviar el texto con el botón.
       await enviarMensajeConBotonComprar(to, detallesProducto);
     }
     
   } catch (error) {
-    // Este es un catch general por si todo el proceso falla
     console.error(`❌ Error fatal en la función enviarCatalogo para el tipo "${tipo}":`, error.message);
     if (error.response) {
       console.error('❌ Datos del error de la API de Meta:', JSON.stringify(error.response.data, null, 2));
