@@ -179,10 +179,11 @@ app.post('/webhook', async (req, res) => {
       }
 
       // Respuesta a "gracias"
-      if (/^(gracias|muchas gracias|mil gracias|gracias!|gracias :)?)$/i.test(mensaje)) {
-        await enviarMensajeTexto(from, '😄 ¡Gracias a ti! Estamos para servirte.');
-        return res.sendStatus(200);
-      }
+if (/^(gracias|muchas gracias|mil gracias|gracias!|gracias \:\))$/i.test(mensaje)) {
+  await enviarMensajeTexto(from, '😄 ¡Gracias a ti! Estamos para servirte.');
+  return res.sendStatus(200);
+}
+
 
       // Flujos de compra (texto libre)
       if (estadoUsuario[from] === 'ESPERANDO_DATOS_LIMA' || estadoUsuario[from] === 'ESPERANDO_DATOS_PROVINCIA') {
