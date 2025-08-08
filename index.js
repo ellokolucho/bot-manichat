@@ -349,12 +349,12 @@ async function enviarCatalogo(to, tipo) {
   }
 }
 
-// Lógica de ChatGPT
+// ===== LÓGICA DE CHATGPT (CORREGIDA) =====
 async function enviarConsultaChatGPT(senderId, mensajeCliente) {
   try {
     if (!memoriaConversacion[senderId]) memoriaConversacion[senderId] = [];
     memoriaConversacion[senderId].push({ role: 'user', content: mensajeCliente });
-    
+
     const contexto = [
       { role: 'system', content: `${systemPrompt}\nAquí tienes los datos del catálogo: ${JSON.stringify(data, null, 2)}` },
       ...memoriaConversacion[senderId]
@@ -367,7 +367,32 @@ async function enviarConsultaChatGPT(senderId, mensajeCliente) {
 
     const respuesta = response.choices[0].message.content.trim();
     memoriaConversacion[senderId].push({ role: 'assistant', content: respuesta });
+
+    // --- LÓGICA DE INTERPRETACIÓN DE COMANDOS (RESTAURADA) ---
+    if (respuesta.startsWith('MOSTRAR_MODELO:')) {
+      const codigo = respuesta.split(':')[1].trim();
+      const producto = Object.values(data).flat().find(p => p.codigo === codigo) || Object.values(promoData).find(p => p.codigo === codigo);
+      
+      if (producto) {
+        await enviarInfoPromo(senderId, producto);
+      } else {
+        await enviarMensajeTexto(senderId, `😔 Lo siento, no pude encontrar el modelo con el código ${codigo}.`);
+      }
+      return;
+    }
+
+    if (respuesta.startsWith('MOSTRAR_CATALOGO:')) {
+      const categoria = respuesta.split(':')[1].trim().toLowerCase();
+      await enviarCatalogo(senderId, categoria);
+      return;
+    }
+
+    if (respuesta === 'PEDIR_CATALOGO') {
+      await enviarMenuPrincipal(senderId);
+      return;
+    }
     
+    // Si no es un comando especial, enviamos la respuesta de texto de ChatGPT
     await enviarMensajeTexto(senderId, respuesta);
 
   } catch (error) {
