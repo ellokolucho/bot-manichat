@@ -16,6 +16,7 @@ const contadorMensajesAsesor = {};
 const estadoUsuario = {};
 let primerMensaje = {};
 let timersInactividad = {};
+let pedidoActivo = {}; // NUEVO: Para recordar el producto que se está comprando
 
 const app = express();
 app.use(bodyParser.json());
@@ -40,7 +41,7 @@ app.get('/webhook', (req, res) => {
   }
 });
 
-// ✅ Funciones para gestionar la inactividad del usuario
+// Funciones para gestionar la inactividad del usuario
 function reiniciarTimerInactividad(senderId) {
   if (timersInactividad[senderId]) {
     clearTimeout(timersInactividad[senderId].timer10);
@@ -72,7 +73,8 @@ async function finalizarSesion(senderId) {
     delete estadoUsuario[senderId];
     delete memoriaConversacion[senderId];
     delete contadorMensajesAsesor[senderId];
-    delete primerMensaje[senderId]; // Limpiamos el estado al finalizar
+    delete primerMensaje[senderId];
+    delete pedidoActivo[senderId]; // Limpiamos el pedido activo
 
     await enviarMensajeTexto(senderId, "⏳ Su sesión ha terminado. ¡Gracias por visitar Tiendas Megan!");
   } catch (error) {
@@ -101,10 +103,12 @@ app.post('/webhook', async (req, res) => {
 
     // --- MANEJO DE BOTONES ---
     if (type === 'interactive' && message.interactive?.button_reply?.id) {
-      primerMensaje[from] = true; // Un clic en un botón cuenta como primera interacción
+      primerMensaje[from] = true;
       const buttonId = message.interactive.button_reply.id;
 
-      if (buttonId.startsWith('COMPRAR_PRODUCTO')) { // Maneja todos los botones de compra
+      if (buttonId.startsWith('COMPRAR_PRODUCTO_')) {
+          const codigoProducto = buttonId.replace('COMPRAR_PRODUCTO_', '');
+          pedidoActivo[from] = { codigo: codigoProducto }; // Guardamos el código del producto
           await enviarPreguntaUbicacion(from);
           return res.sendStatus(200);
       }
@@ -156,21 +160,21 @@ app.post('/webhook', async (req, res) => {
       return res.sendStatus(200);
     }
 
-    // --- LÓGICA PARA MENSAJES DE TEXTO ---
+    // --- LÓGICA PARA MENSAJES DE TEXTO CON SISTEMA DE PRIORIDADES ---
     if (type === 'text') {
       const text = message.text.body;
       const mensaje = text.trim().toLowerCase();
 
-      // PRIORIDAD 1: Flujos activos (el bot espera datos)
+      // PRIORIDAD 1: Flujos de Compra Activos
       if (estadoUsuario[from] === 'ESPERANDO_DATOS_LIMA' || estadoUsuario[from] === 'ESPERANDO_DATOS_PROVINCIA') {
-        await manejarFlujoCompra(from, text); // Se pasa el texto original
+        await manejarFlujoCompra(from, text);
         return res.sendStatus(200);
       }
+      
+      // PRIORIDAD 2: Flujo de Asesor Activo
       if (estadoUsuario[from] === 'ASESOR') {
         if (mensaje === 'salir') {
-            delete estadoUsuario[from];
-            delete memoriaConversacion[from];
-            delete contadorMensajesAsesor[from];
+            delete estadoUsuario[from]; // Salir del modo asesor
             await enviarMensajeTexto(from, "🚪 Ha salido del chat con asesor.");
             await enviarMenuPrincipal(from);
         } else {
@@ -179,31 +183,35 @@ app.post('/webhook', async (req, res) => {
         return res.sendStatus(200);
       }
       
-      // Disparadores de promociones
+      // PRIORIDAD 3: Detección de Intento de Compra (El "Interruptor")
+      const contieneDNI = /\b\d{8}\b/.test(mensaje);
+      const contieneDireccion = /(jirón|jr\.|avenida|av\.|calle|pasaje|mz|mza|lote|urb\.|urbanización)/i.test(mensaje);
+      if (pedidoActivo[from] && (contieneDNI || contieneDireccion)) {
+          await manejarFlujoCompra(from, text);
+          return res.sendStatus(200);
+      }
+
+      // PRIORIDAD 4: Comandos Específicos y Promociones
       if (mensaje.includes('me interesa este reloj exclusivo')) {
-          primerMensaje[from] = true; // La promo cuenta como primera interacción
+          primerMensaje[from] = true;
           await enviarInfoPromo(from, promoData.reloj1);
           return res.sendStatus(200);
       }
       if (mensaje.includes('me interesa este reloj de lujo')) {
-          primerMensaje[from] = true; // La promo cuenta como primera interacción
+          primerMensaje[from] = true;
           await enviarInfoPromo(from, promoData.reloj2);
           return res.sendStatus(200);
       }
-
-      // PRIORIDAD 2: Comandos específicos
       if (/^(gracias|muchas gracias|mil gracias)$/i.test(mensaje)) {
-        await enviarMensajeTexto(from, "😊 ¡De nada! Estamos para servirle."); // Emoji cambiado
+        await enviarMensajeTexto(from, "😊 ¡De nada! Estamos para servirle.");
         return res.sendStatus(200);
       }
 
-      // PRIORIDAD 3: Lógica por defecto (Primera interacción vs. ChatGPT)
+      // PRIORIDAD 5: Lógica por Defecto (ChatGPT o Menú Principal)
       if (primerMensaje[from]) {
-        // Si ya ha habido una interacción, cualquier texto libre va a ChatGPT
         await enviarConsultaChatGPT(from, text);
       } else {
-        // Si es la primera interacción del usuario, le mostramos el menú principal
-        primerMensaje[from] = true; // Marcamos que ya tuvimos la primera interacción
+        primerMensaje[from] = true;
         await enviarMenuPrincipal(from);
       }
       return res.sendStatus(200);
@@ -271,7 +279,7 @@ async function enviarSubmenuTipoReloj(to, genero) {
   }
 }
 
-// ===== FUNCIÓN DE CATÁLOGO CON AJUSTES FINALES =====
+// Envía catálogo de productos
 async function enviarCatalogo(to, tipo) {
   try {
     const productos = data[tipo];
@@ -323,7 +331,6 @@ async function enviarCatalogo(to, tipo) {
       await new Promise(resolve => setTimeout(resolve, 1000));
     }
     
-    // Llamamos a la función que maneja el mensaje final
     await enviarMensajeFinalCatalogo(to);
     
   } catch (error) {
@@ -335,14 +342,12 @@ async function enviarCatalogo(to, tipo) {
   }
 }
 
-// Lógica de ChatGPT con memoria y triggers
+// Lógica de ChatGPT
 async function enviarConsultaChatGPT(senderId, mensajeCliente) {
   try {
     if (!memoriaConversacion[senderId]) memoriaConversacion[senderId] = [];
     memoriaConversacion[senderId].push({ role: 'user', content: mensajeCliente });
-    if (!contadorMensajesAsesor[senderId]) contadorMensajesAsesor[senderId] = 0;
-    contadorMensajesAsesor[senderId]++;
-
+    
     const contexto = [
       { role: 'system', content: `${systemPrompt}\nAquí tienes los datos del catálogo: ${JSON.stringify(data, null, 2)}` },
       ...memoriaConversacion[senderId]
@@ -355,42 +360,10 @@ async function enviarConsultaChatGPT(senderId, mensajeCliente) {
 
     const respuesta = response.choices[0].message.content.trim();
     memoriaConversacion[senderId].push({ role: 'assistant', content: respuesta });
-
-    if (respuesta.startsWith('MOSTRAR_MODELO:')) {
-      const codigo = respuesta.split(':')[1].trim();
-      const producto = Object.values(data).flat().find(p => p.codigo === codigo);
-      if (producto) {
-        await enviarInfoPromo(senderId, producto);
-      } else {
-        await enviarMensajeTexto(senderId, '😔 Lo siento, no encontramos ese modelo en nuestra base de datos.');
-      }
-      return;
-    }
-
-    if (respuesta.startsWith('MOSTRAR_CATALOGO:')) {
-      const categoria = respuesta.split(':')[1].trim().toLowerCase();
-      await enviarCatalogo(senderId, categoria);
-      return;
-    }
-
-    if (respuesta === 'PEDIR_CATALOGO') {
-      await enviarMensajeTexto(senderId, '😊 Claro que sí. ¿El catálogo que le gustaría ver es para caballeros o para damas?');
-      estadoUsuario[senderId] = 'ESPERANDO_GENERO';
-      return;
-    }
-
-    if (respuesta.startsWith('PREGUNTAR_TIPO:')) {
-      const genero = respuesta.split(':')[1].trim().toUpperCase();
-      estadoUsuario[senderId] = `ESPERANDO_TIPO_${genero}`;
-      await enviarSubmenuTipoReloj(senderId, genero);
-      return;
-    }
     
-    if (!contadorMensajesAsesor[senderId] || contadorMensajesAsesor[senderId] < 6) {
-      await enviarMensajeTexto(senderId, respuesta);
-    } else {
-      await enviarMensajeConBotonSalir(senderId, respuesta);
-    }
+    // Aquí podrías añadir lógica para que ChatGPT te devuelva triggers especiales
+    // Por ahora, solo responde el texto.
+    await enviarMensajeTexto(senderId, respuesta);
 
   } catch (error) {
     console.error('❌ Error en consulta a ChatGPT:', error);
@@ -398,32 +371,103 @@ async function enviarConsultaChatGPT(senderId, mensajeCliente) {
   }
 }
 
-
-// ===== FUNCIÓN DE VALIDACIÓN DE COMPRA MODIFICADA =====
+// ===== FUNCIÓN DE VALIDACIÓN Y CIERRE DE COMPRA (MODIFICADA) =====
 async function manejarFlujoCompra(senderId, mensaje) {
-  const dniEncontrado = mensaje.match(/\b\d{8}\b/);
-  const tieneDireccion = /(jirón|jr\.|avenida|av\.|calle|pasaje|mz|mza|lote|urb\.|urbanización)/i.test(mensaje);
-
-  if (estadoUsuario[senderId] === 'ESPERANDO_DATOS_PROVINCIA') {
-    if (!dniEncontrado) {
-      return await enviarMensajeTexto(senderId, "📌 Por favor, asegúrese de incluir su número de DNI de 8 dígitos.");
+    // Primero, validamos que haya un producto seleccionado
+    if (!pedidoActivo[senderId] || !pedidoActivo[senderId].codigo) {
+        await enviarMensajeTexto(senderId, "😊 Veo que quiere hacer un pedido. Por favor, primero seleccione un modelo del catálogo para poder continuar.");
+        return;
     }
 
-    await enviarMensajeTexto(senderId, "✅ ¡Su orden para provincia ha sido confirmada! Un asesor se comunicará con usted en breve para coordinar el pago y el envío. ¡Gracias! 😊");
-    delete estadoUsuario[senderId];
-    return;
-  }
+    const dniRegex = /\b(\d{8})\b/;
+    const dniMatch = mensaje.match(dniRegex);
+    const tieneDireccion = /(jirón|jr\.|avenida|av\.|calle|pasaje|mz|mza|lote|urb\.|urbanización)/i.test(mensaje);
 
-  if (estadoUsuario[senderId] === 'ESPERANDO_DATOS_LIMA') {
-    if (!tieneDireccion) {
-      return await enviarMensajeTexto(senderId, "📌 Por favor, asegúrese de incluir una dirección válida (ej: Av. Principal 123).");
+    let datosExtraidos = {
+        nombre: mensaje.split('\n')[0].trim(), // Asume que el nombre es la primera línea
+        dni: dniMatch ? dniMatch[1] : null,
+        direccion: mensaje, // Guardamos todo el mensaje como dirección/agencia
+        tipo: null
+    };
+
+    if (dniMatch) {
+        datosExtraidos.tipo = 'Provincia';
+    } else if (tieneDireccion) {
+        datosExtraidos.tipo = 'Lima';
+    } else {
+        // Si no se puede determinar, pedimos que aclaren
+        await enviarMensajeTexto(senderId, "📌 No pudimos identificar claramente sus datos. Por favor, asegúrese de incluir su DNI (para provincia) o su dirección (para Lima).");
+        return;
     }
+
+    // Mensaje de confirmación inicial
+    await enviarMensajeTexto(senderId, `✅ ¡Su orden para ${datosExtraidos.tipo} ha sido confirmada! Un asesor se comunicará con usted en breve. ¡Gracias! 😊`);
+
+    // Pausa de 5 segundos
+    await new Promise(resolve => setTimeout(resolve, 5000));
     
-    await enviarMensajeTexto(senderId, "✅ ¡Su orden para Lima ha sido confirmada! Un asesor se comunicará con usted en breve para coordinar la entrega. ¡Gracias! 😊");
+    // Generar y enviar el resumen
+    await generarYEnviarResumen(senderId, datosExtraidos);
+    
+    // Limpiar estados
     delete estadoUsuario[senderId];
-    return;
-  }
+    delete pedidoActivo[senderId];
 }
+
+
+// ===== NUEVA FUNCIÓN PARA GENERAR EL RESUMEN DE LA ORDEN =====
+async function generarYEnviarResumen(senderId, datos) {
+    try {
+        const codigoProducto = pedidoActivo[senderId]?.codigo;
+        if (!codigoProducto) return;
+
+        // Buscar el producto en ambos catálogos (normal y promo)
+        let producto = Object.values(data).flat().find(p => p.codigo === codigoProducto);
+        if (!producto) {
+            producto = Object.values(promoData).find(p => p.codigo === codigoProducto);
+        }
+
+        if (!producto) {
+            console.error(`❌ No se encontró el producto con el código ${codigoProducto} para generar el resumen.`);
+            return;
+        }
+
+        let resumenTexto = `*Resumen de su Pedido* 📝\n\n`;
+        resumenTexto += `*Nombre:* ${datos.nombre}\n`;
+        
+        if (datos.tipo === 'Provincia') {
+            resumenTexto += `*DNI:* ${datos.dni}\n`;
+            resumenTexto += `*Forma de Envío:* Envío a recoger en la agencia Shalom\n`;
+            resumenTexto += `*Lugar:* ${datos.direccion}\n`; // El usuario pone la agencia aquí
+        } else { // Lima
+            resumenTexto += `*Forma de Envío:* Envío express a domicilio\n`;
+            resumenTexto += `*Dirección:* ${datos.direccion}\n`;
+        }
+
+        resumenTexto += `*Monto a Pagar:* ${producto.precio} soles`;
+
+        // Enviar el resumen con la imagen del producto
+        await axios.post(
+          `https://graph.facebook.com/v18.0/${phoneNumberId}/messages`,
+          {
+            messaging_product: 'whatsapp',
+            recipient_type: 'individual',
+            to: senderId,
+            type: 'image',
+            image: {
+              link: producto.imagen,
+              caption: resumenTexto
+            }
+          },
+          { headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` } }
+        );
+
+    } catch (error) {
+        console.error('❌ Error generando o enviando el resumen del pedido:', error.response ? JSON.stringify(error.response.data) : error.message);
+        await enviarMensajeTexto(senderId, "⚠️ Tuvimos un problema al generar el resumen de su orden. Un asesor se comunicará de todas formas.");
+    }
+}
+
 
 // Envía promociones e info de producto
 async function enviarInfoPromo(to, producto) {
@@ -522,33 +566,9 @@ async function enviarMensajeConBotonSalir(to, text) {
   }
 }
 
-// Función para enviar el botón de comprar
-async function enviarMensajeConBotonComprar(to, text) {
-  try {
-    await axios.post(
-      `https://graph.facebook.com/v18.0/${phoneNumberId}/messages`,
-      {
-        messaging_product: 'whatsapp',
-        recipient_type: 'individual',
-        to,
-        type: 'interactive',
-        interactive: {
-          type: 'button',
-          body: { text },
-          action: { buttons: [{ type: 'reply', reply: { id: `COMPRAR_PRODUCTO`, title: '🛍️ Pedir este modelo' } }] }
-        }
-      },
-      { headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` } }
-    );
-  } catch (error) {
-    console.error('❌ Error enviando botón de comprar:', JSON.stringify(error.response?.data || error.message));
-  }
-}
-
-// ===== FUNCIÓN PARA EL MENSAJE FINAL DEL CATÁLOGO (MODIFICADA) =====
+// Envía el mensaje final del catálogo con un botón
 async function enviarMensajeFinalCatalogo(to) {
   try {
-    // La pausa se elimina para que el mensaje sea inmediato
     const textoAmigable = "✨ Tenemos estos modelos disponibles, ¿qué modelito le gustaría adquirir? 😉";
 
     await axios.post(
@@ -578,7 +598,6 @@ async function enviarMensajeFinalCatalogo(to) {
     console.error('❌ Error enviando mensaje final del catálogo:', JSON.stringify(error.response?.data || error.message));
   }
 }
-
 
 // Pregunta si el pedido es para Lima o Provincia
 async function enviarPreguntaUbicacion(senderId) {
