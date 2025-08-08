@@ -12,11 +12,11 @@ const systemPrompt = fs.readFileSync('./SystemPrompt.txt', 'utf-8');
 
 // Memoria de conversaciones y estados de flujo
 const memoriaConversacion = {};
-const contadorMensajesAsesor = {};
 const estadoUsuario = {};
 let primerMensaje = {};
 let timersInactividad = {};
-let pedidoActivo = {}; // Para recordar el producto que se está comprando
+let pedidoActivo = {};
+let timersHibernacion = {}; // Para controlar los timers de "no molestar"
 
 const app = express();
 app.use(bodyParser.json());
@@ -55,7 +55,7 @@ function reiniciarTimerInactividad(senderId) {
   }, 10 * 60 * 1000);
 
   timersInactividad[senderId].timer12 = setTimeout(() => {
-    finalizarSesion(senderId);
+    finalizarSesion(senderId, true); // Finaliza la sesión pero conserva la memoria
   }, 12 * 60 * 1000);
 }
 
@@ -68,15 +68,23 @@ async function enviarAvisoInactividad(senderId) {
   }
 }
 
-async function finalizarSesion(senderId) {
+// FUNCIÓN MODIFICADA: Ahora puede conservar la memoria de la conversación
+async function finalizarSesion(senderId, conservarMemoria = false) {
   try {
     delete estadoUsuario[senderId];
-    delete memoriaConversacion[senderId];
-    delete contadorMensajesAsesor[senderId];
-    delete primerMensaje[senderId];
-    delete pedidoActivo[senderId]; // Limpiamos el pedido activo
+    delete pedidoActivo[senderId];
+    if (timersHibernacion[senderId]) {
+        clearTimeout(timersHibernacion[senderId]);
+        delete timersHibernacion[senderId];
+    }
 
-    await enviarMensajeTexto(senderId, "⏳ Su sesión ha terminado. ¡Gracias por visitar Tiendas Megan!");
+    if (!conservarMemoria) {
+        delete memoriaConversacion[senderId];
+        delete primerMensaje[senderId];
+        await enviarMensajeTexto(senderId, "⏳ Su sesión ha terminado. ¡Gracias por visitar Tiendas Megan!");
+    } else {
+         console.log(`Sesión de pedido para ${senderId} finalizada. Se conserva la memoria de chat.`);
+    }
   } catch (error) {
     console.error('❌ Error finalizando sesión:', error.response?.data || error.message);
   }
@@ -101,6 +109,17 @@ app.post('/webhook', async (req, res) => {
 
     reiniciarTimerInactividad(from);
 
+    // ===== NUEVO MODO POST-VENTA (MÁXIMA PRIORIDAD) =====
+    if (estadoUsuario[from] === 'ESPERANDO_COMPROBANTE') {
+        if (type === 'image') {
+            await enviarMensajeTexto(from, "OK, estimado, vamos a confirmarlo. En breve le enviamos una respuesta.");
+            finalizarSesion(from, true); // Finaliza el pedido pero conserva la memoria
+        } else if (type === 'text') {
+            await enviarConsultaChatGPT(from, message.text.body, 'post-venta');
+        }
+        return res.sendStatus(200); // Termina el procesamiento aquí para este estado
+    }
+
     // --- MANEJO DE BOTONES ---
     if (type === 'interactive' && message.interactive?.button_reply?.id) {
       primerMensaje[from] = true;
@@ -108,7 +127,7 @@ app.post('/webhook', async (req, res) => {
 
       if (buttonId.startsWith('COMPRAR_PRODUCTO_')) {
           const codigoProducto = buttonId.replace('COMPRAR_PRODUCTO_', '');
-          pedidoActivo[from] = { codigo: codigoProducto }; // Guardamos el código del producto
+          pedidoActivo[from] = { codigo: codigoProducto };
           await enviarPreguntaUbicacion(from);
           return res.sendStatus(200);
       }
@@ -163,19 +182,18 @@ app.post('/webhook', async (req, res) => {
       const text = message.text.body;
       const mensaje = text.trim().toLowerCase();
 
-      // PRIORIDAD 1: Flujos Activos (el bot espera una respuesta específica)
+      // PRIORIDAD 1: Flujos Activos (ya no incluye ESPERANDO_COMPROBANTE que se maneja arriba)
       if (estadoUsuario[from] === 'ESPERANDO_DATOS_LIMA' || estadoUsuario[from] === 'ESPERANDO_DATOS_PROVINCIA') {
         await manejarFlujoCompra(from, text);
         return res.sendStatus(200);
       }
       if (estadoUsuario[from] === 'ESPERANDO_CONFIRMACION_PAGO') {
-        // CORRECCIÓN: La expresión regular ahora es más flexible.
         if (/(si|sí|ok|ya|correcto|confirmo|esta bien|está bien)/i.test(mensaje)) {
           await enviarInstruccionesDePago(from);
         } else {
           await enviarMensajeTexto(from, "Entendido. Si hay algún dato que desee corregir, por favor contáctese con un asesor.");
+          delete estadoUsuario[from];
         }
-        delete estadoUsuario[from]; // Se termina el flujo de compra
         return res.sendStatus(200);
       }
       if (estadoUsuario[from] === 'ASESOR') {
@@ -350,14 +368,20 @@ async function enviarCatalogo(to, tipo) {
   }
 }
 
-// Lógica de ChatGPT
-async function enviarConsultaChatGPT(senderId, mensajeCliente) {
+// LÓGICA DE CHATGPT (MODIFICADA PARA MODO POST-VENTA)
+async function enviarConsultaChatGPT(senderId, mensajeCliente, modo = 'normal') {
   try {
     if (!memoriaConversacion[senderId]) memoriaConversacion[senderId] = [];
     memoriaConversacion[senderId].push({ role: 'user', content: mensajeCliente });
+
+    let systemMessageContent = `${systemPrompt}\nAquí tienes los datos del catálogo: ${JSON.stringify(data, null, 2)}`;
     
+    if (modo === 'post-venta') {
+        systemMessageContent += `\n\nINSTRUCCIÓN ESPECIAL: El usuario acaba de recibir los medios de pago para un pedido. Aún no ha enviado el comprobante. Tu tarea principal ahora es resolver sus dudas sobre la seguridad del pago, la confianza en la tienda o el proceso. Sé muy tranquilizador, profesional y anímale a completar el pago. NO intentes venderle otro producto ni mostrarle el catálogo de nuevo. Responde a sus preguntas de forma concisa y amable.`;
+    }
+
     const contexto = [
-      { role: 'system', content: `${systemPrompt}\nAquí tienes los datos del catálogo: ${JSON.stringify(data, null, 2)}` },
+      { role: 'system', content: systemMessageContent },
       ...memoriaConversacion[senderId]
     ];
 
@@ -368,6 +392,34 @@ async function enviarConsultaChatGPT(senderId, mensajeCliente) {
 
     const respuesta = response.choices[0].message.content.trim();
     memoriaConversacion[senderId].push({ role: 'assistant', content: respuesta });
+
+    if (respuesta.startsWith('MOSTRAR_MODELO:')) {
+      const codigo = respuesta.split(':')[1].trim();
+      const producto = Object.values(data).flat().find(p => p.codigo === codigo) || Object.values(promoData).find(p => p.codigo === codigo);
+      if (producto) {
+        await enviarInfoPromo(senderId, producto);
+      } else {
+        await enviarMensajeTexto(senderId, `😔 Lo siento, no pude encontrar el modelo con el código ${codigo}.`);
+      }
+      return;
+    }
+
+    if (respuesta.startsWith('MOSTRAR_CATALOGO:')) {
+      const categoria = respuesta.split(':')[1].trim().toLowerCase();
+      await enviarCatalogo(senderId, categoria);
+      return;
+    }
+
+    if (respuesta === 'PEDIR_CATALOGO') {
+      await enviarMenuPrincipal(senderId);
+      return;
+    }
+
+    if (respuesta.startsWith('PREGUNTAR_TIPO:')) {
+        const genero = respuesta.split(':')[1].trim().toUpperCase();
+        await enviarSubmenuTipoReloj(senderId, genero);
+        return;
+    }
     
     await enviarMensajeTexto(senderId, respuesta);
 
@@ -377,7 +429,7 @@ async function enviarConsultaChatGPT(senderId, mensajeCliente) {
   }
 }
 
-// ===== FUNCIÓN DE VALIDACIÓN Y CIERRE DE COMPRA (MODIFICADA) =====
+// Función de validación y cierre de compra
 async function manejarFlujoCompra(senderId, mensaje) {
     if (!pedidoActivo[senderId] || !pedidoActivo[senderId].codigo) {
         await enviarMensajeTexto(senderId, "😊 Veo que quiere hacer un pedido. Por favor, primero seleccione un modelo del catálogo para poder continuar.");
@@ -399,7 +451,6 @@ async function manejarFlujoCompra(senderId, mensaje) {
         return;
     }
 
-    // CORRECCIÓN: Mensaje de confirmación inicial modificado
     await enviarMensajeTexto(senderId, `✅ ¡Su orden para ${tipoPedido} ha sido confirmada! En breve le enviamos la orden. 😊`);
 
     await new Promise(resolve => setTimeout(resolve, 5000));
@@ -416,7 +467,7 @@ async function manejarFlujoCompra(senderId, mensaje) {
 }
 
 
-// ===== FUNCIÓN PARA GENERAR EL RESUMEN DE LA ORDEN (MODIFICADA) =====
+// Función para generar el resumen de la orden
 async function generarYEnviarResumen(senderId, datos) {
     try {
         const codigoProducto = pedidoActivo[senderId]?.codigo;
@@ -429,22 +480,20 @@ async function generarYEnviarResumen(senderId, datos) {
             return;
         }
         
-        // CORRECCIÓN: Se añade el nombre del producto al resumen
         let resumenTexto = `*${producto.nombre}*\n\n`;
         resumenTexto += `*Resumen de su Pedido* 📝\n\n`;
-        resumenTexto += `*Nombre:* ${datos.nombre}\n`;
+        resumenTexto += `✅ *Nombre:* ${datos.nombre}\n`;
         
         if (datos.tipo === 'Provincia') {
-            resumenTexto += `*DNI:* ${datos.dni}\n`;
-            resumenTexto += `*Forma de Envío:* Envío a recoger en la agencia Shalom\n`;
-            resumenTexto += `*Lugar:* ${datos.lugar}\n`;
+            resumenTexto += `✅ *DNI:* ${datos.dni}\n`;
+            resumenTexto += `✅ *Forma de Envío:* Envío a recoger en la agencia Shalom\n`;
+            resumenTexto += `✅ *Lugar:* ${datos.lugar}\n`;
         } else { // Lima
-            resumenTexto += `*Forma de Envío:* Envío express a domicilio\n`;
-            resumenTexto += `*Dirección:* ${datos.lugar}\n`;
+            resumenTexto += `✅ *Forma de Envío:* Envío express a domicilio\n`;
+            resumenTexto += `✅ *Dirección:* ${datos.lugar}\n`;
         }
 
-        resumenTexto += `*Monto a Pagar:* ${producto.precio} soles\n\n`;
-        // CORRECCIÓN: Se añade el check verde
+        resumenTexto += `✅ *Monto a Pagar:* ${producto.precio} soles\n\n`;
         resumenTexto += `Por favor confirme si los datos están correctos para proceder con el envío. ✅`;
 
         await axios.post(
@@ -468,15 +517,25 @@ async function generarYEnviarResumen(senderId, datos) {
     }
 }
 
-// ===== NUEVA FUNCIÓN PARA ENVIAR INSTRUCCIONES DE PAGO =====
+// Función para enviar instrucciones de pago
 async function enviarInstruccionesDePago(to) {
     try {
         const mensajeAdelanto = "😊 Estimad@, para enviar su pedido necesitamos un adelanto Simbólico de 30 soles por motivo de seguridad. Esto nos permite asegurar que el cliente se compromete a recoger su pedido. El resto se paga cuando su pedido llegue a la agencia, antes de recoger.";
         const mensajeMediosPago = "*MEDIOS DE PAGO*\n👉 *YAPE* : 979 434 826\n(Paulina Gonzales Ortega)\n\n👉 *Cuenta BCP Soles*\n19303208489096\n\n👉 *CCI para transferir de otros bancos*\n00219310320848909613";
 
         await enviarMensajeTexto(to, mensajeAdelanto);
-        await new Promise(resolve => setTimeout(resolve, 1000)); // Pequeña pausa
+        await new Promise(resolve => setTimeout(resolve, 1000));
         await enviarMensajeTexto(to, mensajeMediosPago);
+
+        estadoUsuario[to] = 'ESPERANDO_COMPROBANTE';
+        
+        if (timersHibernacion[to]) clearTimeout(timersHibernacion[to]);
+        timersHibernacion[to] = setTimeout(() => {
+            if (estadoUsuario[to] === 'ESPERANDO_COMPROBANTE') {
+                console.log(`Timer de hibernación para ${to} expirado. Limpiando estado de venta.`);
+                finalizarSesion(to, true); // Finaliza el estado de venta pero conserva la memoria
+            }
+        }, 1 * 60 * 60 * 1000); // 1 hora
 
     } catch (error) {
          console.error('❌ Error enviando instrucciones de pago:', error.message);
