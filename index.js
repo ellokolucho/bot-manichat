@@ -368,11 +368,10 @@ async function enviarConsultaChatGPT(senderId, mensajeCliente) {
     const respuesta = response.choices[0].message.content.trim();
     memoriaConversacion[senderId].push({ role: 'assistant', content: respuesta });
 
-    // --- LÓGICA DE INTERPRETACIÓN DE COMANDOS (RESTAURADA) ---
+    // --- LÓGICA DE INTERPRETACIÓN DE COMANDOS (RESTAURADA Y MEJORADA) ---
     if (respuesta.startsWith('MOSTRAR_MODELO:')) {
       const codigo = respuesta.split(':')[1].trim();
       const producto = Object.values(data).flat().find(p => p.codigo === codigo) || Object.values(promoData).find(p => p.codigo === codigo);
-      
       if (producto) {
         await enviarInfoPromo(senderId, producto);
       } else {
@@ -390,6 +389,12 @@ async function enviarConsultaChatGPT(senderId, mensajeCliente) {
     if (respuesta === 'PEDIR_CATALOGO') {
       await enviarMenuPrincipal(senderId);
       return;
+    }
+
+    if (respuesta.startsWith('PREGUNTAR_TIPO:')) {
+        const genero = respuesta.split(':')[1].trim().toUpperCase();
+        await enviarSubmenuTipoReloj(senderId, genero);
+        return;
     }
     
     // Si no es un comando especial, enviamos la respuesta de texto de ChatGPT
