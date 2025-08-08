@@ -144,11 +144,13 @@ app.post('/webhook', async (req, res) => {
           break;
         case 'COMPRAR_LIMA':
           estadoUsuario[from] = 'ESPERANDO_DATOS_LIMA';
-          await enviarMensajeTexto(from, "😊 Claro que sí. Por favor, para enviar su pedido indíquenos los siguientes datos:\n\n✅ Nombre completo ✍️\n✅ Número de WhatsApp 📱\n✅ Dirección exacta 📍\n✅ Una referencia de cómo llegar a su domicilio 🏠");
+          // Se elimina la solicitud de WhatsApp
+          await enviarMensajeTexto(from, "😊 Claro que sí. Por favor, para enviar su pedido indíquenos los siguientes datos:\n\n✅ Nombre completo ✍️\n✅ Dirección exacta 📍\n✅ Una referencia de cómo llegar a su domicilio 🏠");
           break;
         case 'COMPRAR_PROVINCIA':
           estadoUsuario[from] = 'ESPERANDO_DATOS_PROVINCIA';
-          await enviarMensajeTexto(from, "😊 Claro que sí. Por favor, permítanos los siguientes datos para programar su pedido:\n\n✅ Nombre completo ✍️\n✅ DNI 🪪\n✅ Número de WhatsApp 📱\n✅ Agencia Shalom que le queda más cerca 🚚");
+           // Se elimina la solicitud de WhatsApp
+          await enviarMensajeTexto(from, "😊 Claro que sí. Por favor, permítanos los siguientes datos para programar su pedido:\n\n✅ Nombre completo ✍️\n✅ DNI 🪪\n✅ Agencia Shalom que le queda más cerca 🚚");
           break;
         default:
           await enviarMensajeTexto(from, '❓ No entendí tu selección, por favor intenta de nuevo.');
@@ -163,7 +165,7 @@ app.post('/webhook', async (req, res) => {
 
       // PRIORIDAD 1: Flujos activos (el bot espera datos)
       if (estadoUsuario[from] === 'ESPERANDO_DATOS_LIMA' || estadoUsuario[from] === 'ESPERANDO_DATOS_PROVINCIA') {
-        await manejarFlujoCompra(from, text);
+        await manejarFlujoCompra(from, text); // Se pasa el texto original
         return res.sendStatus(200);
       }
       if (estadoUsuario[from] === 'ASESOR') {
@@ -323,7 +325,6 @@ async function enviarCatalogo(to, tipo) {
       await new Promise(resolve => setTimeout(resolve, 1000));
     }
     
-    // Llamamos a la nueva función que maneja el mensaje final
     await enviarMensajeFinalCatalogo(to);
     
   } catch (error) {
@@ -398,44 +399,27 @@ async function enviarConsultaChatGPT(senderId, mensajeCliente) {
   }
 }
 
-
+// ===== FUNCIÓN DE VALIDACIÓN DE COMPRA MODIFICADA =====
 async function manejarFlujoCompra(senderId, mensaje) {
-  const tieneCelular = /\b9\d{8}\b/.test(mensaje);
-  const tieneNombre = /^([A-ZÁÉÍÓÚÑ][a-záéíóúñ]+)(\s+[A-ZÁÉÍÓÚÑ]?[a-záéíóúñ]+){1,3}$/.test(mensaje);
+  const dniEncontrado = mensaje.match(/\b\d{8}\b/);
   const tieneDireccion = /(jirón|jr\.|avenida|av\.|calle|pasaje|mz|mza|lote|urb\.|urbanización)/i.test(mensaje);
-  const tieneDNI = /\b\d{8}\b/.test(mensaje);
 
   if (estadoUsuario[senderId] === 'ESPERANDO_DATOS_PROVINCIA') {
-    if (!tieneNombre) return await enviarMensajeTexto(senderId, "📌 Por favor envíe su nombre completo.");
-    if (!tieneDNI) return await enviarMensajeTexto(senderId, "📌 Su DNI debe tener 8 dígitos. Por favor, envíelo correctamente.");
-    if (!tieneCelular) return await enviarMensajeTexto(senderId, "📌 Su número de WhatsApp debe tener 9 dígitos y comenzar con 9.");
+    if (!dniEncontrado) {
+      return await enviarMensajeTexto(senderId, "📌 Por favor, asegúrese de incluir su número de DNI de 8 dígitos.");
+    }
 
-    await enviarMensajeTexto(senderId,
-      "✅ Su orden ha sido confirmada ✔\nEnvío de: 1 Reloj Premium\n" +
-      "👉 Forma: Envío a recoger en Agencia Shalom\n" +
-      "👉 Datos recibidos correctamente.\n");
-
-    await enviarMensajeTexto(senderId,
-      "😊 Estimado cliente, para enviar su pedido necesitamos un adelanto simbólico de 20 soles por motivo de seguridad.\n\n" +
-      "📱 YAPE: 979 434 826 (Paulina Gonzales Ortega)\n" +
-      "🏦 BCP: 19303208489096\n" +
-      "🏦 CCI: 00219310320848909613\n\n" +
-      "📤 Envíe la captura de su pago aquí para registrar su adelanto.");
+    await enviarMensajeTexto(senderId, "✅ ¡Su orden para provincia ha sido confirmada! Un asesor se comunicará con usted en breve para coordinar el pago y el envío. ¡Gracias! 😊");
     delete estadoUsuario[senderId];
     return;
   }
 
   if (estadoUsuario[senderId] === 'ESPERANDO_DATOS_LIMA') {
-    if (!tieneNombre) return await enviarMensajeTexto(senderId, "📌 Por favor envíe su nombre completo.");
-    if (!tieneCelular) return await enviarMensajeTexto(senderId, "📌 Su número de WhatsApp debe tener 9 dígitos y comenzar con 9.");
-    if (!tieneDireccion) return await enviarMensajeTexto(senderId, "📌 Su dirección debe incluir calle, avenida, jirón o pasaje.");
-
-    await enviarMensajeTexto(senderId,
-      "✅ Su orden ha sido confirmada ✔\nEnvío de: 1 Reloj Premium\n" +
-      "👉 Forma: Envío express a domicilio\n" +
-      "👉 Datos recibidos correctamente.\n" +
-      "💰 El costo incluye S/10 adicionales por envío a domicilio.");
-
+    if (!tieneDireccion) {
+      return await enviarMensajeTexto(senderId, "📌 Por favor, asegúrese de incluir una dirección válida (ej: Av. Principal 123).");
+    }
+    
+    await enviarMensajeTexto(senderId, "✅ ¡Su orden para Lima ha sido confirmada! Un asesor se comunicará con usted en breve para coordinar la entrega. ¡Gracias! 😊");
     delete estadoUsuario[senderId];
     return;
   }
@@ -561,10 +545,9 @@ async function enviarMensajeConBotonComprar(to, text) {
   }
 }
 
-// ===== NUEVA FUNCIÓN PARA EL MENSAJE FINAL DEL CATÁLOGO =====
+// Envía el mensaje final del catálogo con un botón
 async function enviarMensajeFinalCatalogo(to) {
   try {
-    // Esperamos 10 segundos
     await new Promise(resolve => setTimeout(resolve, 10000));
 
     const textoAmigable = "✨ Tenemos estos modelos disponibles, ¿qué modelito le gustaría adquirir? 😉";
@@ -609,7 +592,7 @@ async function enviarPreguntaUbicacion(senderId) {
         type: 'interactive',
         interactive: {
           type: 'button',
-          body: { text: "😊 Por favor indíquenos, ¿su pedido es para Lima o para Provincia?" },
+          body: { text: "😊 Para coordinar su envío, ¿su pedido es para Lima o para Provincia?" },
           action: {
             buttons: [
               { type: 'reply', reply: { id: 'COMPRAR_LIMA', title: '🏙 Lima' } },
