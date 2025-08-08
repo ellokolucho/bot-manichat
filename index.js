@@ -169,10 +169,10 @@ app.post('/webhook', async (req, res) => {
         return res.sendStatus(200);
       }
       if (estadoUsuario[from] === 'ESPERANDO_CONFIRMACION_PAGO') {
-        if (/^(si|sí|ok|ya|correcto|confirmo|esta bien|está bien)$/i.test(mensaje)) {
+        if (/(si|sí|ok|ya|correcto|confirmo|esta bien|está bien)/i.test(mensaje)) {
           await enviarInstruccionesDePago(from);
         } else {
-          await enviarMensajeTexto(from, " entendido. Si hay algún dato que desee corregir, por favor contáctese con un asesor.");
+          await enviarMensajeTexto(from, "Entendido. Si hay algún dato que desee corregir, por favor contáctese con un asesor.");
         }
         delete estadoUsuario[from]; // Se termina el flujo de compra
         return res.sendStatus(200);
@@ -376,7 +376,7 @@ async function enviarConsultaChatGPT(senderId, mensajeCliente) {
   }
 }
 
-// ===== FUNCIÓN DE VALIDACIÓN Y CIERRE DE COMPRA (MODIFICADA) =====
+// Función de validación y cierre de compra
 async function manejarFlujoCompra(senderId, mensaje) {
     if (!pedidoActivo[senderId] || !pedidoActivo[senderId].codigo) {
         await enviarMensajeTexto(senderId, "😊 Veo que quiere hacer un pedido. Por favor, primero seleccione un modelo del catálogo para poder continuar.");
@@ -398,26 +398,23 @@ async function manejarFlujoCompra(senderId, mensaje) {
         return;
     }
 
-    // Mensaje de confirmación inicial modificado
     await enviarMensajeTexto(senderId, `✅ ¡Su orden para ${tipoPedido} ha sido confirmada! En breve le enviamos la orden. 😊`);
 
-    // Pausa de 5 segundos
     await new Promise(resolve => setTimeout(resolve, 5000));
     
-    // Extraer datos de manera más robusta
     const nombre = lineas[0] || '';
-    const lugar = lineas.slice(1).filter(l => l !== dni).join(', ') || lineas.slice(1).join(', ');
+    const lugar = lineas.slice(1).filter(l => l.trim() !== dni).join(', ') || lineas.slice(1).join(', ');
 
     const datosExtraidos = { nombre, dni, lugar, tipo: tipoPedido };
     
     await generarYEnviarResumen(senderId, datosExtraidos);
     
-    delete estadoUsuario[senderId]; // Limpiamos estado anterior
-    estadoUsuario[senderId] = 'ESPERANDO_CONFIRMACION_PAGO'; // Establecemos nuevo estado
+    delete estadoUsuario[senderId];
+    estadoUsuario[senderId] = 'ESPERANDO_CONFIRMACION_PAGO';
 }
 
 
-// ===== NUEVA FUNCIÓN PARA GENERAR EL RESUMEN DE LA ORDEN =====
+// Función para generar el resumen de la orden
 async function generarYEnviarResumen(senderId, datos) {
     try {
         const codigoProducto = pedidoActivo[senderId]?.codigo;
@@ -429,21 +426,22 @@ async function generarYEnviarResumen(senderId, datos) {
             console.error(`❌ No se encontró el producto con el código ${codigoProducto} para generar el resumen.`);
             return;
         }
-
-        let resumenTexto = `*Resumen de su Pedido* 📝\n\n`;
-        resumenTexto += `*Nombre:* ${datos.nombre}\n`;
+        
+        let resumenTexto = `*${producto.nombre}*\n\n`;
+        resumenTexto += `*Resumen de su Pedido* 📝\n\n`;
+        resumenTexto += `✅ *Nombre:* ${datos.nombre}\n`;
         
         if (datos.tipo === 'Provincia') {
-            resumenTexto += `*DNI:* ${datos.dni}\n`;
-            resumenTexto += `*Forma de Envío:* Envío a recoger en la agencia Shalom\n`;
-            resumenTexto += `*Lugar:* ${datos.lugar}\n`;
+            resumenTexto += `✅ *DNI:* ${datos.dni}\n`;
+            resumenTexto += `✅ *Forma de Envío:* Envío a recoger en la agencia Shalom\n`;
+            resumenTexto += `✅ *Lugar:* ${datos.lugar}\n`;
         } else { // Lima
-            resumenTexto += `*Forma de Envío:* Envío express a domicilio\n`;
-            resumenTexto += `*Dirección:* ${datos.lugar}\n`;
+            resumenTexto += `✅ *Forma de Envío:* Envío express a domicilio\n`;
+            resumenTexto += `✅ *Dirección:* ${datos.lugar}\n`;
         }
 
-        resumenTexto += `*Monto a Pagar:* ${producto.precio} soles\n\n`;
-        resumenTexto += `Por favor confirme si los datos están correctos para proceder con el envío.`;
+        resumenTexto += `✅ *Monto a Pagar:* ${producto.precio} soles\n\n`;
+        resumenTexto += `Por favor confirme si los datos están correctos para proceder con el envío. ✅`;
 
         await axios.post(
           `https://graph.facebook.com/v18.0/${phoneNumberId}/messages`,
@@ -466,7 +464,7 @@ async function generarYEnviarResumen(senderId, datos) {
     }
 }
 
-// ===== NUEVA FUNCIÓN PARA ENVIAR INSTRUCCIONES DE PAGO =====
+// Función para enviar instrucciones de pago
 async function enviarInstruccionesDePago(to) {
     try {
         const mensajeAdelanto = "😊 Estimad@, para enviar su pedido necesitamos un adelanto Simbólico de 30 soles por motivo de seguridad. Esto nos permite asegurar que el cliente se compromete a recoger su pedido. El resto se paga cuando su pedido llegue a la agencia, antes de recoger.";
