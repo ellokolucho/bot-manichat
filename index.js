@@ -169,6 +169,7 @@ app.post('/webhook', async (req, res) => {
         return res.sendStatus(200);
       }
       if (estadoUsuario[from] === 'ESPERANDO_CONFIRMACION_PAGO') {
+        // CORRECCIÓN: La expresión regular ahora es más flexible.
         if (/(si|sí|ok|ya|correcto|confirmo|esta bien|está bien)/i.test(mensaje)) {
           await enviarInstruccionesDePago(from);
         } else {
@@ -349,12 +350,12 @@ async function enviarCatalogo(to, tipo) {
   }
 }
 
-// ===== LÓGICA DE CHATGPT (CORREGIDA) =====
+// Lógica de ChatGPT
 async function enviarConsultaChatGPT(senderId, mensajeCliente) {
   try {
     if (!memoriaConversacion[senderId]) memoriaConversacion[senderId] = [];
     memoriaConversacion[senderId].push({ role: 'user', content: mensajeCliente });
-
+    
     const contexto = [
       { role: 'system', content: `${systemPrompt}\nAquí tienes los datos del catálogo: ${JSON.stringify(data, null, 2)}` },
       ...memoriaConversacion[senderId]
@@ -367,37 +368,7 @@ async function enviarConsultaChatGPT(senderId, mensajeCliente) {
 
     const respuesta = response.choices[0].message.content.trim();
     memoriaConversacion[senderId].push({ role: 'assistant', content: respuesta });
-
-    // --- LÓGICA DE INTERPRETACIÓN DE COMANDOS (RESTAURADA Y MEJORADA) ---
-    if (respuesta.startsWith('MOSTRAR_MODELO:')) {
-      const codigo = respuesta.split(':')[1].trim();
-      const producto = Object.values(data).flat().find(p => p.codigo === codigo) || Object.values(promoData).find(p => p.codigo === codigo);
-      if (producto) {
-        await enviarInfoPromo(senderId, producto);
-      } else {
-        await enviarMensajeTexto(senderId, `😔 Lo siento, no pude encontrar el modelo con el código ${codigo}.`);
-      }
-      return;
-    }
-
-    if (respuesta.startsWith('MOSTRAR_CATALOGO:')) {
-      const categoria = respuesta.split(':')[1].trim().toLowerCase();
-      await enviarCatalogo(senderId, categoria);
-      return;
-    }
-
-    if (respuesta === 'PEDIR_CATALOGO') {
-      await enviarMenuPrincipal(senderId);
-      return;
-    }
-
-    if (respuesta.startsWith('PREGUNTAR_TIPO:')) {
-        const genero = respuesta.split(':')[1].trim().toUpperCase();
-        await enviarSubmenuTipoReloj(senderId, genero);
-        return;
-    }
     
-    // Si no es un comando especial, enviamos la respuesta de texto de ChatGPT
     await enviarMensajeTexto(senderId, respuesta);
 
   } catch (error) {
@@ -406,7 +377,7 @@ async function enviarConsultaChatGPT(senderId, mensajeCliente) {
   }
 }
 
-// Función de validación y cierre de compra
+// ===== FUNCIÓN DE VALIDACIÓN Y CIERRE DE COMPRA (MODIFICADA) =====
 async function manejarFlujoCompra(senderId, mensaje) {
     if (!pedidoActivo[senderId] || !pedidoActivo[senderId].codigo) {
         await enviarMensajeTexto(senderId, "😊 Veo que quiere hacer un pedido. Por favor, primero seleccione un modelo del catálogo para poder continuar.");
@@ -428,6 +399,7 @@ async function manejarFlujoCompra(senderId, mensaje) {
         return;
     }
 
+    // CORRECCIÓN: Mensaje de confirmación inicial modificado
     await enviarMensajeTexto(senderId, `✅ ¡Su orden para ${tipoPedido} ha sido confirmada! En breve le enviamos la orden. 😊`);
 
     await new Promise(resolve => setTimeout(resolve, 5000));
@@ -444,7 +416,7 @@ async function manejarFlujoCompra(senderId, mensaje) {
 }
 
 
-// Función para generar el resumen de la orden
+// ===== FUNCIÓN PARA GENERAR EL RESUMEN DE LA ORDEN (MODIFICADA) =====
 async function generarYEnviarResumen(senderId, datos) {
     try {
         const codigoProducto = pedidoActivo[senderId]?.codigo;
@@ -457,20 +429,22 @@ async function generarYEnviarResumen(senderId, datos) {
             return;
         }
         
+        // CORRECCIÓN: Se añade el nombre del producto al resumen
         let resumenTexto = `*${producto.nombre}*\n\n`;
         resumenTexto += `*Resumen de su Pedido* 📝\n\n`;
-        resumenTexto += `✅ *Nombre:* ${datos.nombre}\n`;
+        resumenTexto += `*Nombre:* ${datos.nombre}\n`;
         
         if (datos.tipo === 'Provincia') {
-            resumenTexto += `✅ *DNI:* ${datos.dni}\n`;
-            resumenTexto += `✅ *Forma de Envío:* Envío a recoger en la agencia Shalom\n`;
-            resumenTexto += `✅ *Lugar:* ${datos.lugar}\n`;
+            resumenTexto += `*DNI:* ${datos.dni}\n`;
+            resumenTexto += `*Forma de Envío:* Envío a recoger en la agencia Shalom\n`;
+            resumenTexto += `*Lugar:* ${datos.lugar}\n`;
         } else { // Lima
-            resumenTexto += `✅ *Forma de Envío:* Envío express a domicilio\n`;
-            resumenTexto += `✅ *Dirección:* ${datos.lugar}\n`;
+            resumenTexto += `*Forma de Envío:* Envío express a domicilio\n`;
+            resumenTexto += `*Dirección:* ${datos.lugar}\n`;
         }
 
-        resumenTexto += `✅ *Monto a Pagar:* ${producto.precio} soles\n\n`;
+        resumenTexto += `*Monto a Pagar:* ${producto.precio} soles\n\n`;
+        // CORRECCIÓN: Se añade el check verde
         resumenTexto += `Por favor confirme si los datos están correctos para proceder con el envío. ✅`;
 
         await axios.post(
@@ -494,7 +468,7 @@ async function generarYEnviarResumen(senderId, datos) {
     }
 }
 
-// Función para enviar instrucciones de pago
+// ===== NUEVA FUNCIÓN PARA ENVIAR INSTRUCCIONES DE PAGO =====
 async function enviarInstruccionesDePago(to) {
     try {
         const mensajeAdelanto = "😊 Estimad@, para enviar su pedido necesitamos un adelanto Simbólico de 30 soles por motivo de seguridad. Esto nos permite asegurar que el cliente se compromete a recoger su pedido. El resto se paga cuando su pedido llegue a la agencia, antes de recoger.";
