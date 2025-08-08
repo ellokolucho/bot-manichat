@@ -60,7 +60,7 @@ function reiniciarTimerInactividad(senderId) {
 
 async function enviarAvisoInactividad(senderId) {
   try {
-    const text = "¿Podemos ayudarte en algo más? 😊 También puedes continuar tu pedido por WhatsApp:";
+    const text = "¿Podemos ayudarle en algo más? 😊 También puede continuar su pedido por WhatsApp:";
     await enviarMensajeConBotonSalir(senderId, text);
   } catch (error) {
     console.error('❌ Error enviando aviso de inactividad:', error.response?.data || error.message);
@@ -74,7 +74,7 @@ async function finalizarSesion(senderId) {
     delete contadorMensajesAsesor[senderId];
     delete primerMensaje[senderId]; // Limpiamos el estado al finalizar
 
-    await enviarMensajeTexto(senderId, "⏳ Tu sesión ha terminado. ¡Gracias por visitar Tiendas Megan!");
+    await enviarMensajeTexto(senderId, "⏳ Su sesión ha terminado. ¡Gracias por visitar Tiendas Megan!");
   } catch (error) {
     console.error('❌ Error finalizando sesión:', error.response?.data || error.message);
   }
@@ -133,27 +133,25 @@ app.post('/webhook', async (req, res) => {
           estadoUsuario[from] = 'ASESOR';
           memoriaConversacion[from] = [];
           contadorMensajesAsesor[from] = 0;
-          await enviarMensajeConBotonSalir(from, "😊 ¡Claro que sí! Estamos listos para responder todas sus dudas y consultas. Por favor, escríbenos qué te gustaría saber ✍️");
+          await enviarMensajeConBotonSalir(from, "😊 ¡Claro que sí! Estamos listos para responder todas sus dudas y consultas. Por favor, escríbanos qué le gustaría saber ✍️");
           break;
         case 'SALIR':
           delete estadoUsuario[from];
           delete memoriaConversacion[from];
           delete contadorMensajesAsesor[from];
-          await enviarMensajeTexto(from, "🚪 Has salido del chat con asesor. Volviendo al menú principal...");
+          await enviarMensajeTexto(from, "🚪 Ha salido del chat con asesor. Volviendo al menú principal...");
           await enviarMenuPrincipal(from);
           break;
         case 'COMPRAR_LIMA':
           estadoUsuario[from] = 'ESPERANDO_DATOS_LIMA';
-          // Se elimina la solicitud de WhatsApp
           await enviarMensajeTexto(from, "😊 Claro que sí. Por favor, para enviar su pedido indíquenos los siguientes datos:\n\n✅ Nombre completo ✍️\n✅ Dirección exacta 📍\n✅ Una referencia de cómo llegar a su domicilio 🏠");
           break;
         case 'COMPRAR_PROVINCIA':
           estadoUsuario[from] = 'ESPERANDO_DATOS_PROVINCIA';
-           // Se elimina la solicitud de WhatsApp
           await enviarMensajeTexto(from, "😊 Claro que sí. Por favor, permítanos los siguientes datos para programar su pedido:\n\n✅ Nombre completo ✍️\n✅ DNI 🪪\n✅ Agencia Shalom que le queda más cerca 🚚");
           break;
         default:
-          await enviarMensajeTexto(from, '❓ No entendí tu selección, por favor intenta de nuevo.');
+          await enviarMensajeTexto(from, '❓ No entendí su selección, por favor intenta de nuevo.');
       }
       return res.sendStatus(200);
     }
@@ -173,7 +171,7 @@ app.post('/webhook', async (req, res) => {
             delete estadoUsuario[from];
             delete memoriaConversacion[from];
             delete contadorMensajesAsesor[from];
-            await enviarMensajeTexto(from, "🚪 Has salido del chat con asesor.");
+            await enviarMensajeTexto(from, "🚪 Ha salido del chat con asesor.");
             await enviarMenuPrincipal(from);
         } else {
             await enviarConsultaChatGPT(from, text);
@@ -195,7 +193,7 @@ app.post('/webhook', async (req, res) => {
 
       // PRIORIDAD 2: Comandos específicos
       if (/^(gracias|muchas gracias|mil gracias)$/i.test(mensaje)) {
-        await enviarMensajeTexto(from, "😄 ¡De nada! Estamos para servirle.");
+        await enviarMensajeTexto(from, "😊 ¡De nada! Estamos para servirle."); // Emoji cambiado
         return res.sendStatus(200);
       }
 
@@ -227,12 +225,12 @@ async function enviarMenuPrincipal(to) {
         type: 'interactive',
         interactive: {
           type: 'button',
-          body: { text: '👋 ¡Hola! Bienvenido a Tiendas Megan\n💎 Descubre tu reloj ideal o el regalo perfecto 🎁' },
+          body: { text: '👋 ¡Hola! Bienvenido a Tiendas Megan\n💎 Descubra su reloj ideal o el regalo perfecto 🎁' },
           action: {
             buttons: [
-              { type: 'reply', reply: { id: 'CABALLEROS', title: 'Para Caballeros' } },
-              { type: 'reply', reply: { id: 'DAMAS', title: 'Para Damas' } },
-              { type: 'reply', reply: { id: 'ASESOR', title: 'Hablar con Asesor' } }
+              { type: 'reply', reply: { id: 'CABALLEROS', title: '🤵‍♂️ Para Caballeros' } },
+              { type: 'reply', reply: { id: 'DAMAS', title: '💃 Para Damas' } },
+              { type: 'reply', reply: { id: 'ASESOR', title: '💬 Hablar con Asesor' } }
             ]
           }
         }
@@ -257,11 +255,11 @@ async function enviarSubmenuTipoReloj(to, genero) {
         type: 'interactive',
         interactive: {
           type: 'button',
-          body: { text: `📦 ¿Qué tipo de reloj deseas ver para ${label}?` },
+          body: { text: `✅ ¡Excelente elección! ¿Qué tipo de reloj para ${label} le gustaría ver?` },
           action: {
             buttons: [
-              { type: 'reply', reply: { id: `${genero}_AUTO`, title: '⛓ Automáticos' } },
-              { type: 'reply', reply: { id: `${genero}_CUARZO`, title: '⚙ Cuarzo' } }
+              { type: 'reply', reply: { id: `${genero}_AUTO`, title: '⌚ Automáticos' } },
+              { type: 'reply', reply: { id: `${genero}_CUARZO`, title: '⏱️ De cuarzo' } }
             ]
           }
         }
@@ -278,7 +276,7 @@ async function enviarCatalogo(to, tipo) {
   try {
     const productos = data[tipo];
     if (!productos || !productos.length) {
-      await enviarMensajeTexto(to, '😔 Lo siento, no hay productos disponibles para esa categoría.');
+      await enviarMensajeTexto(to, '😔 Lo siento, no hay productos disponibles en esa categoría.');
       return;
     }
 
@@ -325,6 +323,7 @@ async function enviarCatalogo(to, tipo) {
       await new Promise(resolve => setTimeout(resolve, 1000));
     }
     
+    // Llamamos a la función que maneja el mensaje final
     await enviarMensajeFinalCatalogo(to);
     
   } catch (error) {
@@ -332,7 +331,7 @@ async function enviarCatalogo(to, tipo) {
     if (error.response) {
       console.error('❌ Datos del error de la API de Meta:', JSON.stringify(error.response.data, null, 2));
     }
-    await enviarMensajeTexto(to, '⚠️ Tuvimos un problema al mostrar el catálogo. Por favor, intenta de nuevo más tarde.');
+    await enviarMensajeTexto(to, '⚠️ Tuvimos un problema al mostrar el catálogo. Por favor, intente de nuevo más tarde.');
   }
 }
 
@@ -375,7 +374,7 @@ async function enviarConsultaChatGPT(senderId, mensajeCliente) {
     }
 
     if (respuesta === 'PEDIR_CATALOGO') {
-      await enviarMensajeTexto(senderId, '😊 Claro que sí. ¿El catálogo que deseas ver es para caballeros o para damas?');
+      await enviarMensajeTexto(senderId, '😊 Claro que sí. ¿El catálogo que le gustaría ver es para caballeros o para damas?');
       estadoUsuario[senderId] = 'ESPERANDO_GENERO';
       return;
     }
@@ -395,9 +394,10 @@ async function enviarConsultaChatGPT(senderId, mensajeCliente) {
 
   } catch (error) {
     console.error('❌ Error en consulta a ChatGPT:', error);
-    await enviarMensajeTexto(senderId, '⚠️ Lo siento, hubo un problema al conectarme con el asesor. Intenta nuevamente en unos minutos.');
+    await enviarMensajeTexto(senderId, '⚠️ Lo siento, hubo un problema al conectarme con el asesor. Intente nuevamente en unos minutos.');
   }
 }
+
 
 // ===== FUNCIÓN DE VALIDACIÓN DE COMPRA MODIFICADA =====
 async function manejarFlujoCompra(senderId, mensaje) {
@@ -545,11 +545,10 @@ async function enviarMensajeConBotonComprar(to, text) {
   }
 }
 
-// Envía el mensaje final del catálogo con un botón
+// ===== FUNCIÓN PARA EL MENSAJE FINAL DEL CATÁLOGO (MODIFICADA) =====
 async function enviarMensajeFinalCatalogo(to) {
   try {
-    await new Promise(resolve => setTimeout(resolve, 10000));
-
+    // La pausa se elimina para que el mensaje sea inmediato
     const textoAmigable = "✨ Tenemos estos modelos disponibles, ¿qué modelito le gustaría adquirir? 😉";
 
     await axios.post(
@@ -580,6 +579,7 @@ async function enviarMensajeFinalCatalogo(to) {
   }
 }
 
+
 // Pregunta si el pedido es para Lima o Provincia
 async function enviarPreguntaUbicacion(senderId) {
   try {
@@ -592,11 +592,11 @@ async function enviarPreguntaUbicacion(senderId) {
         type: 'interactive',
         interactive: {
           type: 'button',
-          body: { text: "😊 Para coordinar su envío, ¿su pedido es para Lima o para Provincia?" },
+          body: { text: "😊 Para coordinar el envío, por favor indíquenos, ¿para dónde es su pedido?" },
           action: {
             buttons: [
-              { type: 'reply', reply: { id: 'COMPRAR_LIMA', title: '🏙 Lima' } },
-              { type: 'reply', reply: { id: 'COMPRAR_PROVINCIA', title: '🏞 Provincia' } }
+              { type: 'reply', reply: { id: 'COMPRAR_LIMA', title: '🏙️ Lima' } },
+              { type: 'reply', reply: { id: 'COMPRAR_PROVINCIA', title: '🏞️ Provincia' } }
             ]
           }
         }
