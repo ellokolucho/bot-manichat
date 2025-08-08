@@ -16,7 +16,7 @@ const contadorMensajesAsesor = {};
 const estadoUsuario = {};
 let primerMensaje = {};
 let timersInactividad = {};
-let pedidoActivo = {}; // NUEVO: Para recordar el producto que se está comprando
+let pedidoActivo = {}; // Para recordar el producto que se está comprando
 
 const app = express();
 app.use(bodyParser.json());
@@ -83,7 +83,7 @@ async function finalizarSesion(senderId) {
 }
 
 
-// Recepción de mensajes y flujos interactivos
+// ===== MANEJADOR PRINCIPAL DE MENSAJES =====
 app.post('/webhook', async (req, res) => {
   console.log('📩 Webhook recibido:', JSON.stringify(req.body, null, 2));
   const body = req.body;
@@ -136,13 +136,11 @@ app.post('/webhook', async (req, res) => {
         case 'ASESOR':
           estadoUsuario[from] = 'ASESOR';
           memoriaConversacion[from] = [];
-          contadorMensajesAsesor[from] = 0;
           await enviarMensajeConBotonSalir(from, "😊 ¡Claro que sí! Estamos listos para responder todas sus dudas y consultas. Por favor, escríbanos qué le gustaría saber ✍️");
           break;
         case 'SALIR':
           delete estadoUsuario[from];
           delete memoriaConversacion[from];
-          delete contadorMensajesAsesor[from];
           await enviarMensajeTexto(from, "🚪 Ha salido del chat con asesor. Volviendo al menú principal...");
           await enviarMenuPrincipal(from);
           break;
@@ -165,16 +163,23 @@ app.post('/webhook', async (req, res) => {
       const text = message.text.body;
       const mensaje = text.trim().toLowerCase();
 
-      // PRIORIDAD 1: Flujos de Compra Activos
+      // PRIORIDAD 1: Flujos Activos (el bot espera una respuesta específica)
       if (estadoUsuario[from] === 'ESPERANDO_DATOS_LIMA' || estadoUsuario[from] === 'ESPERANDO_DATOS_PROVINCIA') {
         await manejarFlujoCompra(from, text);
         return res.sendStatus(200);
       }
-      
-      // PRIORIDAD 2: Flujo de Asesor Activo
+      if (estadoUsuario[from] === 'ESPERANDO_CONFIRMACION_PAGO') {
+        if (/^(si|sí|ok|ya|correcto|confirmo|esta bien|está bien)$/i.test(mensaje)) {
+          await enviarInstruccionesDePago(from);
+        } else {
+          await enviarMensajeTexto(from, " entendido. Si hay algún dato que desee corregir, por favor contáctese con un asesor.");
+        }
+        delete estadoUsuario[from]; // Se termina el flujo de compra
+        return res.sendStatus(200);
+      }
       if (estadoUsuario[from] === 'ASESOR') {
         if (mensaje === 'salir') {
-            delete estadoUsuario[from]; // Salir del modo asesor
+            delete estadoUsuario[from];
             await enviarMensajeTexto(from, "🚪 Ha salido del chat con asesor.");
             await enviarMenuPrincipal(from);
         } else {
@@ -183,7 +188,7 @@ app.post('/webhook', async (req, res) => {
         return res.sendStatus(200);
       }
       
-      // PRIORIDAD 3: Detección de Intento de Compra (El "Interruptor")
+      // PRIORIDAD 2: Detección de Intento de Compra (El "Interruptor")
       const contieneDNI = /\b\d{8}\b/.test(mensaje);
       const contieneDireccion = /(jirón|jr\.|avenida|av\.|calle|pasaje|mz|mza|lote|urb\.|urbanización)/i.test(mensaje);
       if (pedidoActivo[from] && (contieneDNI || contieneDireccion)) {
@@ -191,7 +196,7 @@ app.post('/webhook', async (req, res) => {
           return res.sendStatus(200);
       }
 
-      // PRIORIDAD 4: Comandos Específicos y Promociones
+      // PRIORIDAD 3: Comandos Específicos y Promociones
       if (mensaje.includes('me interesa este reloj exclusivo')) {
           primerMensaje[from] = true;
           await enviarInfoPromo(from, promoData.reloj1);
@@ -207,7 +212,7 @@ app.post('/webhook', async (req, res) => {
         return res.sendStatus(200);
       }
 
-      // PRIORIDAD 5: Lógica por Defecto (ChatGPT o Menú Principal)
+      // PRIORIDAD 4: Lógica por Defecto (ChatGPT o Menú Principal)
       if (primerMensaje[from]) {
         await enviarConsultaChatGPT(from, text);
       } else {
@@ -220,6 +225,8 @@ app.post('/webhook', async (req, res) => {
 
   res.sendStatus(200);
 });
+
+// ===== FUNCIONES AUXILIARES =====
 
 // Inicia conversación principal
 async function enviarMenuPrincipal(to) {
@@ -250,7 +257,7 @@ async function enviarMenuPrincipal(to) {
   }
 }
 
-// Submenú tipo de reloj según género
+// Submenú tipo de reloj
 async function enviarSubmenuTipoReloj(to, genero) {
   const label = genero === 'CABALLEROS' ? 'caballeros' : 'damas';
   try {
@@ -361,8 +368,6 @@ async function enviarConsultaChatGPT(senderId, mensajeCliente) {
     const respuesta = response.choices[0].message.content.trim();
     memoriaConversacion[senderId].push({ role: 'assistant', content: respuesta });
     
-    // Aquí podrías añadir lógica para que ChatGPT te devuelva triggers especiales
-    // Por ahora, solo responde el texto.
     await enviarMensajeTexto(senderId, respuesta);
 
   } catch (error) {
@@ -373,45 +378,42 @@ async function enviarConsultaChatGPT(senderId, mensajeCliente) {
 
 // ===== FUNCIÓN DE VALIDACIÓN Y CIERRE DE COMPRA (MODIFICADA) =====
 async function manejarFlujoCompra(senderId, mensaje) {
-    // Primero, validamos que haya un producto seleccionado
     if (!pedidoActivo[senderId] || !pedidoActivo[senderId].codigo) {
         await enviarMensajeTexto(senderId, "😊 Veo que quiere hacer un pedido. Por favor, primero seleccione un modelo del catálogo para poder continuar.");
         return;
     }
 
-    const dniRegex = /\b(\d{8})\b/;
-    const dniMatch = mensaje.match(dniRegex);
-    const tieneDireccion = /(jirón|jr\.|avenida|av\.|calle|pasaje|mz|mza|lote|urb\.|urbanización)/i.test(mensaje);
+    const lineas = mensaje.split('\n').map(line => line.trim()).filter(line => line);
+    const dniMatch = mensaje.match(/\b(\d{8})\b/);
+    const dni = dniMatch ? dniMatch[1] : null;
+    const tieneDireccion = /(jirón|jr\.|avenida|av\.|calle|pasaje)/i.test(mensaje);
 
-    let datosExtraidos = {
-        nombre: mensaje.split('\n')[0].trim(), // Asume que el nombre es la primera línea
-        dni: dniMatch ? dniMatch[1] : null,
-        direccion: mensaje, // Guardamos todo el mensaje como dirección/agencia
-        tipo: null
-    };
-
-    if (dniMatch) {
-        datosExtraidos.tipo = 'Provincia';
+    let tipoPedido;
+    if (dni) {
+        tipoPedido = 'Provincia';
     } else if (tieneDireccion) {
-        datosExtraidos.tipo = 'Lima';
+        tipoPedido = 'Lima';
     } else {
-        // Si no se puede determinar, pedimos que aclaren
         await enviarMensajeTexto(senderId, "📌 No pudimos identificar claramente sus datos. Por favor, asegúrese de incluir su DNI (para provincia) o su dirección (para Lima).");
         return;
     }
 
-    // Mensaje de confirmación inicial
-    await enviarMensajeTexto(senderId, `✅ ¡Su orden para ${datosExtraidos.tipo} ha sido confirmada! Un asesor se comunicará con usted en breve. ¡Gracias! 😊`);
+    // Mensaje de confirmación inicial modificado
+    await enviarMensajeTexto(senderId, `✅ ¡Su orden para ${tipoPedido} ha sido confirmada! En breve le enviamos la orden. 😊`);
 
     // Pausa de 5 segundos
     await new Promise(resolve => setTimeout(resolve, 5000));
     
-    // Generar y enviar el resumen
+    // Extraer datos de manera más robusta
+    const nombre = lineas[0] || '';
+    const lugar = lineas.slice(1).filter(l => l !== dni).join(', ') || lineas.slice(1).join(', ');
+
+    const datosExtraidos = { nombre, dni, lugar, tipo: tipoPedido };
+    
     await generarYEnviarResumen(senderId, datosExtraidos);
     
-    // Limpiar estados
-    delete estadoUsuario[senderId];
-    delete pedidoActivo[senderId];
+    delete estadoUsuario[senderId]; // Limpiamos estado anterior
+    estadoUsuario[senderId] = 'ESPERANDO_CONFIRMACION_PAGO'; // Establecemos nuevo estado
 }
 
 
@@ -421,11 +423,7 @@ async function generarYEnviarResumen(senderId, datos) {
         const codigoProducto = pedidoActivo[senderId]?.codigo;
         if (!codigoProducto) return;
 
-        // Buscar el producto en ambos catálogos (normal y promo)
-        let producto = Object.values(data).flat().find(p => p.codigo === codigoProducto);
-        if (!producto) {
-            producto = Object.values(promoData).find(p => p.codigo === codigoProducto);
-        }
+        let producto = Object.values(data).flat().find(p => p.codigo === codigoProducto) || Object.values(promoData).find(p => p.codigo === codigoProducto);
 
         if (!producto) {
             console.error(`❌ No se encontró el producto con el código ${codigoProducto} para generar el resumen.`);
@@ -438,15 +436,15 @@ async function generarYEnviarResumen(senderId, datos) {
         if (datos.tipo === 'Provincia') {
             resumenTexto += `*DNI:* ${datos.dni}\n`;
             resumenTexto += `*Forma de Envío:* Envío a recoger en la agencia Shalom\n`;
-            resumenTexto += `*Lugar:* ${datos.direccion}\n`; // El usuario pone la agencia aquí
+            resumenTexto += `*Lugar:* ${datos.lugar}\n`;
         } else { // Lima
             resumenTexto += `*Forma de Envío:* Envío express a domicilio\n`;
-            resumenTexto += `*Dirección:* ${datos.direccion}\n`;
+            resumenTexto += `*Dirección:* ${datos.lugar}\n`;
         }
 
-        resumenTexto += `*Monto a Pagar:* ${producto.precio} soles`;
+        resumenTexto += `*Monto a Pagar:* ${producto.precio} soles\n\n`;
+        resumenTexto += `Por favor confirme si los datos están correctos para proceder con el envío.`;
 
-        // Enviar el resumen con la imagen del producto
         await axios.post(
           `https://graph.facebook.com/v18.0/${phoneNumberId}/messages`,
           {
@@ -465,6 +463,21 @@ async function generarYEnviarResumen(senderId, datos) {
     } catch (error) {
         console.error('❌ Error generando o enviando el resumen del pedido:', error.response ? JSON.stringify(error.response.data) : error.message);
         await enviarMensajeTexto(senderId, "⚠️ Tuvimos un problema al generar el resumen de su orden. Un asesor se comunicará de todas formas.");
+    }
+}
+
+// ===== NUEVA FUNCIÓN PARA ENVIAR INSTRUCCIONES DE PAGO =====
+async function enviarInstruccionesDePago(to) {
+    try {
+        const mensajeAdelanto = "😊 Estimad@, para enviar su pedido necesitamos un adelanto Simbólico de 30 soles por motivo de seguridad. Esto nos permite asegurar que el cliente se compromete a recoger su pedido. El resto se paga cuando su pedido llegue a la agencia, antes de recoger.";
+        const mensajeMediosPago = "*MEDIOS DE PAGO*\n👉 *YAPE* : 979 434 826\n(Paulina Gonzales Ortega)\n\n👉 *Cuenta BCP Soles*\n19303208489096\n\n👉 *CCI para transferir de otros bancos*\n00219310320848909613";
+
+        await enviarMensajeTexto(to, mensajeAdelanto);
+        await new Promise(resolve => setTimeout(resolve, 1000)); // Pequeña pausa
+        await enviarMensajeTexto(to, mensajeMediosPago);
+
+    } catch (error) {
+         console.error('❌ Error enviando instrucciones de pago:', error.message);
     }
 }
 
