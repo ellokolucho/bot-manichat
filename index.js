@@ -368,7 +368,7 @@ async function enviarCatalogo(to, tipo) {
   }
 }
 
-// Lógica de ChatGPT
+// LÓGICA DE CHATGPT (CORREGIDA)
 async function enviarConsultaChatGPT(senderId, mensajeCliente, modo = 'normal') {
   try {
     if (!memoriaConversacion[senderId]) memoriaConversacion[senderId] = [];
@@ -431,11 +431,11 @@ async function enviarConsultaChatGPT(senderId, mensajeCliente, modo = 'normal') 
 async function manejarFlujoCompra(senderId, mensaje) {
     const codigoUltimoVisto = pedidoActivo[senderId]?.ultimoProductoVisto;
     if (!pedidoActivo[senderId]?.codigo && codigoUltimoVisto) {
-        pedidoActivo[senderId].codigo = codigoUltimoVisto;
+        pedidoActivo[senderId] = { ...pedidoActivo[senderId], codigo: codigoUltimoVisto };
     }
 
     if (!pedidoActivo[senderId] || !pedidoActivo[senderId].codigo) {
-        await enviarConsultaChatGPT(senderId, mensaje); // Dejamos que ChatGPT pregunte el modelo
+        await enviarConsultaChatGPT(senderId, `El cliente quiere comprar pero no sé qué modelo. Por favor, pregúntale amablemente qué modelo o código le gustaría pedir.`);
         return;
     }
 
