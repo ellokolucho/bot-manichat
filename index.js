@@ -16,7 +16,9 @@ const estadoUsuario = {};
 let primerMensaje = {};
 let timersInactividad = {};
 let pedidoActivo = {};
-let timersHibernacion = {}; // Para controlar los timers de "no molestar"
+let timersHibernacion = {};
+let datosPedidoTemporal = {}; // Para acumular datos del pedido
+let timersPedido = {}; // Para manejar el tiempo de espera de datos
 
 const app = express();
 app.use(bodyParser.json());
@@ -164,10 +166,12 @@ app.post('/webhook', async (req, res) => {
           break;
         case 'COMPRAR_LIMA':
           estadoUsuario[from] = 'ESPERANDO_DATOS_LIMA';
+          datosPedidoTemporal[from] = { texto: '' }; // Inicializa el acumulador de datos
           await enviarMensajeTexto(from, "😊 Claro que sí. Por favor, para enviar su pedido indíquenos los siguientes datos:\n\n✅ Nombre completo ✍️\n✅ Dirección exacta 📍\n✅ Una referencia de cómo llegar a su domicilio 🏠");
           break;
         case 'COMPRAR_PROVINCIA':
           estadoUsuario[from] = 'ESPERANDO_DATOS_PROVINCIA';
+          datosPedidoTemporal[from] = { texto: '' }; // Inicializa el acumulador de datos
           await enviarMensajeTexto(from, "😊 Claro que sí. Por favor, permítanos los siguientes datos para programar su pedido:\n\n✅ Nombre completo ✍️\n✅ DNI 🪪\n✅ Agencia Shalom que le queda más cerca 🚚");
           break;
         default:
@@ -181,11 +185,40 @@ app.post('/webhook', async (req, res) => {
       const text = message.text.body;
       const mensaje = text.trim().toLowerCase();
 
-      // PRIORIDAD 1: Flujos Activos (solo para el flujo de botones)
+      // ===== NUEVO TEMPORIZADOR INTELIGENTE PARA DATOS DE PEDIDO =====
       if (estadoUsuario[from] === 'ESPERANDO_DATOS_LIMA' || estadoUsuario[from] === 'ESPERANDO_DATOS_PROVINCIA') {
-        await manejarFlujoCompra(from, text);
+        
+        datosPedidoTemporal[from].texto += text + '\n';
+        
+        if (verificarDatosCompletos(from)) {
+            // Si los datos están completos, procesa de inmediato
+            if (timersPedido[from]) clearTimeout(timersPedido[from]);
+            await manejarFlujoCompra(from, datosPedidoTemporal[from].texto);
+            delete datosPedidoTemporal[from];
+            delete timersPedido[from];
+        } else {
+            // Si no, reinicia el temporizador
+            if (timersPedido[from]) clearTimeout(timersPedido[from]);
+            
+            timersPedido[from] = setTimeout(async () => {
+                console.log(`Temporizador de pedido para ${from} finalizado.`);
+                if (verificarDatosCompletos(from)) {
+                    await manejarFlujoCompra(from, datosPedidoTemporal[from].texto);
+                } else {
+                    const tipo = estadoUsuario[from];
+                    const msg = tipo === 'ESPERANDO_DATOS_LIMA' 
+                        ? "Parece que faltan datos. Por favor, asegúrese de enviarnos su Nombre, Dirección y Referencia. 😊"
+                        : "Parece que faltan datos. Por favor, asegúrese de enviarnos su Nombre, DNI y Agencia Shalom. 😊";
+                    await enviarMensajeTexto(from, msg);
+                    delete estadoUsuario[from]; // Reinicia el estado para que pueda intentarlo de nuevo
+                }
+                delete datosPedidoTemporal[from];
+                delete timersPedido[from];
+            }, 15000); // 15 segundos de espera
+        }
         return res.sendStatus(200);
       }
+      
       if (estadoUsuario[from] === 'ASESOR') {
         if (mensaje === 'salir') {
             delete estadoUsuario[from];
@@ -228,6 +261,25 @@ app.post('/webhook', async (req, res) => {
 });
 
 // ===== FUNCIONES AUXILIARES =====
+
+// NUEVA FUNCIÓN para verificar si los datos del pedido están completos
+function verificarDatosCompletos(senderId) {
+    const datosAcumulados = datosPedidoTemporal[senderId]?.texto || '';
+    const tipo = estadoUsuario[senderId];
+
+    if (tipo === 'ESPERANDO_DATOS_LIMA') {
+        const tieneNombre = /[a-zA-Z]{3,}/.test(datosAcumulados); // Chequeo simple de que haya texto
+        const tieneDireccion = /(jirón|jr\.|avenida|av\.|calle|pasaje)/i.test(datosAcumulados);
+        return tieneNombre && tieneDireccion;
+    } else if (tipo === 'ESPERANDO_DATOS_PROVINCIA') {
+        const tieneNombre = /[a-zA-Z]{3,}/.test(datosAcumulados);
+        const tieneDNI = /\b\d{8}\b/.test(datosAcumulados);
+        const lineas = datosAcumulados.split('\n').filter(l => l.trim() !== '');
+        // Asumimos que si hay 3 líneas de información (nombre, DNI, agencia), está completo
+        return tieneNombre && tieneDNI && lineas.length >= 3;
+    }
+    return false;
+}
 
 // Inicia conversación principal
 async function enviarMenuPrincipal(to) {
@@ -375,8 +427,12 @@ async function enviarConsultaChatGPT(senderId, mensajeCliente, modo = 'normal') 
 
     const respuesta = response.choices[0].message.content.trim();
     memoriaConversacion[senderId].push({ role: 'assistant', content: respuesta });
-    
-    // Si la respuesta es un trigger, el bot de código tomará el control
+
+    if (respuesta === 'GENERAR_ORDEN') {
+        const ultimoMensajeUsuario = memoriaConversacion[senderId].filter(m => m.role === 'user').slice(-1)[0].content;
+        await manejarFlujoCompra(senderId, ultimoMensajeUsuario);
+        return;
+    }
     if (respuesta.startsWith('MOSTRAR_MODELO:')) {
       const codigo = respuesta.split(':')[1].trim();
       const producto = Object.values(data).flat().find(p => p.codigo === codigo) || Object.values(promoData).find(p => p.codigo === codigo);
@@ -388,11 +444,6 @@ async function enviarConsultaChatGPT(senderId, mensajeCliente, modo = 'normal') 
       }
       return;
     }
-    if (respuesta.startsWith('MOSTRAR_CATALOGO:')) {
-        const categoria = respuesta.split(':')[1].trim();
-        await enviarCatalogo(senderId, categoria);
-        return;
-    }
     if (respuesta === 'PEDIR_CATALOGO') {
       await enviarMenuPrincipal(senderId);
       return;
@@ -403,21 +454,7 @@ async function enviarConsultaChatGPT(senderId, mensajeCliente, modo = 'normal') 
         return;
     }
     
-    // Si no es un trigger, se envía la respuesta de texto de ChatGPT
     await enviarMensajeTexto(senderId, respuesta);
-
-    // Después de enviar, verificamos si era la info de pago para activar el modo post-venta
-    if (respuesta.includes("MEDIOS DE PAGO") && respuesta.includes("YAPE")) {
-        console.log(`Detectados medios de pago para ${senderId}. Activando modo post-venta.`);
-        estadoUsuario[senderId] = 'ESPERANDO_COMPROBANTE';
-        
-        if (timersHibernacion[senderId]) clearTimeout(timersHibernacion[senderId]);
-        timersHibernacion[senderId] = setTimeout(() => {
-            if (estadoUsuario[senderId] === 'ESPERANDO_COMPROBANTE') {
-                finalizarSesion(senderId, true);
-            }
-        }, 1 * 60 * 60 * 1000); // 1 hora
-    }
 
   } catch (error) {
     console.error('❌ Error en consulta a ChatGPT:', error);
@@ -425,10 +462,15 @@ async function enviarConsultaChatGPT(senderId, mensajeCliente, modo = 'normal') 
   }
 }
 
-// Función de validación y cierre de compra (SOLO PARA FLUJO DE BOTONES)
+// Función de validación y cierre de compra
 async function manejarFlujoCompra(senderId, mensaje) {
+    const codigoUltimoVisto = pedidoActivo[senderId]?.ultimoProductoVisto;
+    if (!pedidoActivo[senderId]?.codigo && codigoUltimoVisto) {
+        pedidoActivo[senderId] = { ...pedidoActivo[senderId], codigo: codigoUltimoVisto };
+    }
+
     if (!pedidoActivo[senderId] || !pedidoActivo[senderId].codigo) {
-        await enviarMensajeTexto(senderId, "😊 Veo que quiere hacer un pedido. Por favor, primero seleccione un modelo del catálogo para poder continuar.");
+        await enviarConsultaChatGPT(senderId, "El cliente quiere comprar pero no sé qué modelo. Por favor, pregúntale amablemente qué modelo o código le gustaría pedir.");
         return;
     }
 
@@ -449,6 +491,7 @@ async function manejarFlujoCompra(senderId, mensaje) {
 
     const nombre = lineas[0] || '';
     const lugar = lineas.slice(1).filter(l => l.trim() !== dni).join(', ') || lineas.slice(1).join(', ');
+
     const datosExtraidos = { nombre, dni, lugar, tipo: tipoPedido };
     
     await generarYEnviarResumen(senderId, datosExtraidos);
