@@ -55,7 +55,7 @@ function reiniciarTimerInactividad(senderId) {
   }, 10 * 60 * 1000);
 
   timersInactividad[senderId].timer12 = setTimeout(() => {
-    finalizarSesion(senderId, true); // Finaliza la sesión pero conserva la memoria
+    finalizarSesion(senderId, true);
   }, 12 * 60 * 1000);
 }
 
@@ -68,7 +68,6 @@ async function enviarAvisoInactividad(senderId) {
   }
 }
 
-// FUNCIÓN MODIFICADA: Ahora puede conservar la memoria de la conversación
 async function finalizarSesion(senderId, conservarMemoria = false) {
   try {
     delete estadoUsuario[senderId];
@@ -109,15 +108,15 @@ app.post('/webhook', async (req, res) => {
 
     reiniciarTimerInactividad(from);
 
-    // ===== NUEVO MODO POST-VENTA (MÁXIMA PRIORIDAD) =====
+    // ===== MODO POST-VENTA (MÁXIMA PRIORIDAD) =====
     if (estadoUsuario[from] === 'ESPERANDO_COMPROBANTE') {
         if (type === 'image') {
             await enviarMensajeTexto(from, "OK, estimado, vamos a confirmarlo. En breve le enviamos una respuesta.");
-            finalizarSesion(from, true); // Finaliza el pedido pero conserva la memoria
+            finalizarSesion(from, true);
         } else if (type === 'text') {
             await enviarConsultaChatGPT(from, message.text.body, 'post-venta');
         }
-        return res.sendStatus(200); // Termina el procesamiento aquí para este estado
+        return res.sendStatus(200);
     }
 
     // --- MANEJO DE BOTONES ---
@@ -182,7 +181,7 @@ app.post('/webhook', async (req, res) => {
       const text = message.text.body;
       const mensaje = text.trim().toLowerCase();
 
-      // PRIORIDAD 1: Flujos Activos (ya no incluye ESPERANDO_COMPROBANTE que se maneja arriba)
+      // PRIORIDAD 1: Flujos Activos
       if (estadoUsuario[from] === 'ESPERANDO_DATOS_LIMA' || estadoUsuario[from] === 'ESPERANDO_DATOS_PROVINCIA') {
         await manejarFlujoCompra(from, text);
         return res.sendStatus(200);
@@ -315,6 +314,7 @@ async function enviarCatalogo(to, tipo) {
     }
 
     for (const producto of productos) {
+      pedidoActivo[to] = { ...pedidoActivo[to], ultimoProductoVisto: producto.codigo }; // Guardamos el último producto visto
       const detallesProducto =
         `*${producto.nombre}*\n` +
         `${producto.descripcion}\n` +
@@ -368,7 +368,7 @@ async function enviarCatalogo(to, tipo) {
   }
 }
 
-// LÓGICA DE CHATGPT (MODIFICADA PARA MODO POST-VENTA)
+// LÓGICA DE CHATGPT (MODIFICADA PARA MODO POST-VENTA Y GENERAR ORDEN)
 async function enviarConsultaChatGPT(senderId, mensajeCliente, modo = 'normal') {
   try {
     if (!memoriaConversacion[senderId]) memoriaConversacion[senderId] = [];
@@ -393,28 +393,27 @@ async function enviarConsultaChatGPT(senderId, mensajeCliente, modo = 'normal') 
     const respuesta = response.choices[0].message.content.trim();
     memoriaConversacion[senderId].push({ role: 'assistant', content: respuesta });
 
+    // --- LÓGICA DE INTERPRETACIÓN DE COMANDOS ---
+    if (respuesta === 'GENERAR_ORDEN') {
+        const ultimoMensajeUsuario = memoriaConversacion[senderId].filter(m => m.role === 'user').slice(-1)[0].content;
+        await manejarFlujoCompra(senderId, ultimoMensajeUsuario);
+        return;
+    }
     if (respuesta.startsWith('MOSTRAR_MODELO:')) {
       const codigo = respuesta.split(':')[1].trim();
       const producto = Object.values(data).flat().find(p => p.codigo === codigo) || Object.values(promoData).find(p => p.codigo === codigo);
       if (producto) {
+        pedidoActivo[senderId] = { ...pedidoActivo[senderId], ultimoProductoVisto: producto.codigo };
         await enviarInfoPromo(senderId, producto);
       } else {
         await enviarMensajeTexto(senderId, `😔 Lo siento, no pude encontrar el modelo con el código ${codigo}.`);
       }
       return;
     }
-
-    if (respuesta.startsWith('MOSTRAR_CATALOGO:')) {
-      const categoria = respuesta.split(':')[1].trim().toLowerCase();
-      await enviarCatalogo(senderId, categoria);
-      return;
-    }
-
     if (respuesta === 'PEDIR_CATALOGO') {
       await enviarMenuPrincipal(senderId);
       return;
     }
-
     if (respuesta.startsWith('PREGUNTAR_TIPO:')) {
         const genero = respuesta.split(':')[1].trim().toUpperCase();
         await enviarSubmenuTipoReloj(senderId, genero);
@@ -431,8 +430,14 @@ async function enviarConsultaChatGPT(senderId, mensajeCliente, modo = 'normal') 
 
 // Función de validación y cierre de compra
 async function manejarFlujoCompra(senderId, mensaje) {
+    const codigoUltimoVisto = pedidoActivo[senderId]?.ultimoProductoVisto;
+    if (!pedidoActivo[senderId]?.codigo && codigoUltimoVisto) {
+        pedidoActivo[senderId].codigo = codigoUltimoVisto;
+    }
+
     if (!pedidoActivo[senderId] || !pedidoActivo[senderId].codigo) {
-        await enviarMensajeTexto(senderId, "😊 Veo que quiere hacer un pedido. Por favor, primero seleccione un modelo del catálogo para poder continuar.");
+        await enviarMensajeTexto(senderId, "😊 ¡Excelente! Veo que quiere hacer un pedido. Para asegurarme de generar la orden correcta, ¿podría confirmarme el código o nombre del reloj que desea?");
+        estadoUsuario[senderId] = 'ESPERANDO_PRODUCTO_PARA_ORDEN'; // Un nuevo estado para esta situación
         return;
     }
 
@@ -533,7 +538,7 @@ async function enviarInstruccionesDePago(to) {
         timersHibernacion[to] = setTimeout(() => {
             if (estadoUsuario[to] === 'ESPERANDO_COMPROBANTE') {
                 console.log(`Timer de hibernación para ${to} expirado. Limpiando estado de venta.`);
-                finalizarSesion(to, true); // Finaliza el estado de venta pero conserva la memoria
+                finalizarSesion(to, true);
             }
         }, 1 * 60 * 60 * 1000); // 1 hora
 
@@ -550,6 +555,8 @@ async function enviarInfoPromo(to, producto) {
     await enviarMensajeTexto(to, '⚠️ Lo siento, no pude encontrar los detalles de esa promoción en este momento.');
     return;
   }
+  
+  pedidoActivo[to] = { ...pedidoActivo[to], ultimoProductoVisto: producto.codigo }; // Guardamos el último producto visto
 
   try {
     const detallesProducto =
