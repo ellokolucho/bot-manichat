@@ -182,11 +182,15 @@ app.post('/webhook', async (req, res) => {
       const mensaje = text.trim().toLowerCase();
 
       // PRIORIDAD 1: Flujos Activos
+      if (estadoUsuario[from] === 'ESPERANDO_UBICACION') {
+          await enviarMensajeTexto(from, "Por favor, elija una de las opciones presionando uno de los botones para continuar con su pedido. 😊");
+          return res.sendStatus(200);
+      }
       if (estadoUsuario[from] === 'ESPERANDO_DATOS_LIMA' || estadoUsuario[from] === 'ESPERANDO_DATOS_PROVINCIA') {
         await manejarFlujoCompra(from, text);
         return res.sendStatus(200);
       }
-      if (estadoUsuario[from] === 'ESPERANDO_CONFIRMACION_PAGO') { // Este estado ya no se usa, pero se deja por si acaso
+      if (estadoUsuario[from] === 'ESPERANDO_CONFIRMACION_PAGO') {
         if (/(si|sí|ok|ya|correcto|confirmo|esta bien|está bien)/i.test(mensaje)) {
           await enviarInstruccionesDePagoProvincia(from);
         } else {
@@ -206,7 +210,7 @@ app.post('/webhook', async (req, res) => {
         return res.sendStatus(200);
       }
       
-      // PRIORIDAD 2: Detección de Intento de Compra (El "Interruptor")
+      // PRIORIDAD 2: Detección de Intento de Compra
       const contieneDNI = /\b\d{8}\b/.test(mensaje);
       const contieneDireccion = /(jirón|jr\.|avenida|av\.|calle|pasaje|mz|mza|lote|urb\.|urbanización)/i.test(mensaje);
       if (pedidoActivo[from]?.ultimoProductoVisto && (contieneDNI || contieneDireccion)) {
@@ -437,7 +441,7 @@ async function enviarConsultaChatGPT(senderId, mensajeCliente, modo = 'normal') 
   }
 }
 
-// ===== FUNCIÓN DE VALIDACIÓN Y CIERRE DE COMPRA (MODIFICADA) =====
+// Función de validación y cierre de compra
 async function manejarFlujoCompra(senderId, mensaje) {
     const codigoUltimoVisto = pedidoActivo[senderId]?.ultimoProductoVisto;
     if (!pedidoActivo[senderId]?.codigo && codigoUltimoVisto) {
@@ -464,6 +468,8 @@ async function manejarFlujoCompra(senderId, mensaje) {
         return;
     }
 
+    await enviarMensajeTexto(senderId, `✅ ¡Su orden para ${tipoPedido} ha sido confirmada!`);
+    
     const nombre = lineas[0] || '';
     const lugar = lineas.slice(1).filter(l => l.trim() !== dni).join(', ') || lineas.slice(1).join(', ');
 
@@ -471,10 +477,9 @@ async function manejarFlujoCompra(senderId, mensaje) {
     
     await generarYEnviarResumen(senderId, datosExtraidos);
 
-    // LÓGICA DIFERENCIADA PARA LIMA Y PROVINCIA
     if (tipoPedido === 'Provincia') {
         await enviarInstruccionesDePagoProvincia(senderId);
-    } else { // Lima
+    } else {
         await enviarConfirmacionLima(senderId);
     }
     
@@ -537,22 +542,19 @@ async function generarYEnviarResumen(senderId, datos) {
     }
 }
 
-// ===== FUNCIONES DE CIERRE DE PEDIDO (MODIFICADAS) =====
-
-// NUEVA FUNCIÓN: Solo para pedidos de Lima
+// Función para enviar la confirmación de Lima
 async function enviarConfirmacionLima(to) {
     try {
         const mensaje = "😊 ¡Perfecto! Ya estamos alistando su pedido. Cuando esté listo para la entrega, nos comunicaremos con usted para que esté atento a la hora. ¡Gracias por su compra!";
-        await new Promise(resolve => setTimeout(resolve, 2000)); // Pausa antes de enviar
+        await new Promise(resolve => setTimeout(resolve, 2000));
         await enviarMensajeTexto(to, mensaje);
-        finalizarSesion(to, true); // Finaliza el flujo de pedido pero conserva la memoria
+        finalizarSesion(to, true);
     } catch (error) {
         console.error('❌ Error enviando confirmación de Lima:', error.message);
     }
 }
 
-
-// FUNCIÓN MODIFICADA: Ahora es solo para Provincia
+// Función para enviar instrucciones de pago de Provincia
 async function enviarInstruccionesDePagoProvincia(to) {
     try {
         const mensajeAdelanto = "😊 Estimad@, para enviar su pedido necesitamos un adelanto Simbólico de 30 soles por motivo de seguridad. Esto nos permite asegurar que el cliente se compromete a recoger su pedido. El resto se paga cuando su pedido llegue a la agencia, antes de recoger.";
