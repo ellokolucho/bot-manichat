@@ -185,19 +185,17 @@ app.post('/webhook', async (req, res) => {
       const text = message.text.body;
       const mensaje = text.trim().toLowerCase();
 
-      // ===== NUEVO TEMPORIZADOR INTELIGENTE PARA DATOS DE PEDIDO =====
+      // PRIORIDAD 1: Flujos Activos (Recolectando datos de pedido con temporizador)
       if (estadoUsuario[from] === 'ESPERANDO_DATOS_LIMA' || estadoUsuario[from] === 'ESPERANDO_DATOS_PROVINCIA') {
         
         datosPedidoTemporal[from].texto += text + '\n';
         
         if (verificarDatosCompletos(from)) {
-            // Si los datos están completos, procesa de inmediato
             if (timersPedido[from]) clearTimeout(timersPedido[from]);
             await manejarFlujoCompra(from, datosPedidoTemporal[from].texto);
             delete datosPedidoTemporal[from];
             delete timersPedido[from];
         } else {
-            // Si no, reinicia el temporizador
             if (timersPedido[from]) clearTimeout(timersPedido[from]);
             
             timersPedido[from] = setTimeout(async () => {
@@ -210,7 +208,7 @@ app.post('/webhook', async (req, res) => {
                         ? "Parece que faltan datos. Por favor, asegúrese de enviarnos su Nombre, Dirección y Referencia. 😊"
                         : "Parece que faltan datos. Por favor, asegúrese de enviarnos su Nombre, DNI y Agencia Shalom. 😊";
                     await enviarMensajeTexto(from, msg);
-                    delete estadoUsuario[from]; // Reinicia el estado para que pueda intentarlo de nuevo
+                    delete estadoUsuario[from];
                 }
                 delete datosPedidoTemporal[from];
                 delete timersPedido[from];
@@ -218,7 +216,6 @@ app.post('/webhook', async (req, res) => {
         }
         return res.sendStatus(200);
       }
-      
       if (estadoUsuario[from] === 'ASESOR') {
         if (mensaje === 'salir') {
             delete estadoUsuario[from];
@@ -268,14 +265,13 @@ function verificarDatosCompletos(senderId) {
     const tipo = estadoUsuario[senderId];
 
     if (tipo === 'ESPERANDO_DATOS_LIMA') {
-        const tieneNombre = /[a-zA-Z]{3,}/.test(datosAcumulados); // Chequeo simple de que haya texto
+        const tieneNombre = /[a-zA-Z]{3,}/.test(datosAcumulados);
         const tieneDireccion = /(jirón|jr\.|avenida|av\.|calle|pasaje)/i.test(datosAcumulados);
         return tieneNombre && tieneDireccion;
     } else if (tipo === 'ESPERANDO_DATOS_PROVINCIA') {
         const tieneNombre = /[a-zA-Z]{3,}/.test(datosAcumulados);
         const tieneDNI = /\b\d{8}\b/.test(datosAcumulados);
         const lineas = datosAcumulados.split('\n').filter(l => l.trim() !== '');
-        // Asumimos que si hay 3 líneas de información (nombre, DNI, agencia), está completo
         return tieneNombre && tieneDNI && lineas.length >= 3;
     }
     return false;
@@ -428,11 +424,6 @@ async function enviarConsultaChatGPT(senderId, mensajeCliente, modo = 'normal') 
     const respuesta = response.choices[0].message.content.trim();
     memoriaConversacion[senderId].push({ role: 'assistant', content: respuesta });
 
-    if (respuesta === 'GENERAR_ORDEN') {
-        const ultimoMensajeUsuario = memoriaConversacion[senderId].filter(m => m.role === 'user').slice(-1)[0].content;
-        await manejarFlujoCompra(senderId, ultimoMensajeUsuario);
-        return;
-    }
     if (respuesta.startsWith('MOSTRAR_MODELO:')) {
       const codigo = respuesta.split(':')[1].trim();
       const producto = Object.values(data).flat().find(p => p.codigo === codigo) || Object.values(promoData).find(p => p.codigo === codigo);
@@ -474,21 +465,24 @@ async function manejarFlujoCompra(senderId, mensaje) {
         return;
     }
 
-    const lineas = mensaje.split('\n').map(line => line.trim()).filter(line => line);
-    const dniMatch = mensaje.match(/\b(\d{8})\b/);
-    const dni = dniMatch ? dniMatch[1] : null;
+    const tipoPedido = estadoUsuario[senderId] === 'ESPERANDO_DATOS_LIMA' ? 'Lima' : 'Provincia';
+    
+    const tieneDNI = /\b\d{8}\b/.test(mensaje);
     const tieneDireccion = /(jirón|jr\.|avenida|av\.|calle|pasaje)/i.test(mensaje);
 
-    let tipoPedido;
-    if (dni) {
-        tipoPedido = 'Provincia';
-    } else if (tieneDireccion) {
-        tipoPedido = 'Lima';
-    } else {
-        await enviarMensajeTexto(senderId, "📌 No pudimos identificar claramente sus datos. Por favor, asegúrese de incluir su DNI (para provincia) o su dirección (para Lima).");
+    if (tipoPedido === 'Provincia' && !tieneDNI) {
+        await enviarMensajeTexto(senderId, "📌 No hemos podido identificar un DNI de 8 dígitos en sus datos. Por favor, envíelo para continuar.");
+        return;
+    }
+    if (tipoPedido === 'Lima' && !tieneDireccion) {
+        await enviarMensajeTexto(senderId, "📌 No hemos podido identificar una dirección en sus datos. Por favor, envíela para continuar.");
         return;
     }
 
+    await enviarMensajeTexto(senderId, `✅ ¡Su orden para ${tipoPedido} ha sido confirmada!`);
+    
+    const lineas = mensaje.split('\n').map(line => line.trim()).filter(line => line);
+    const dni = tieneDNI ? mensaje.match(/\b(\d{8})\b/)[1] : null;
     const nombre = lineas[0] || '';
     const lugar = lineas.slice(1).filter(l => l.trim() !== dni).join(', ') || lineas.slice(1).join(', ');
 
