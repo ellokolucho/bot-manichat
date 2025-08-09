@@ -188,7 +188,7 @@ app.post('/webhook', async (req, res) => {
       // PRIORIDAD 1: Flujos Activos (Recolectando datos de pedido con temporizador)
       if (estadoUsuario[from] === 'ESPERANDO_DATOS_LIMA' || estadoUsuario[from] === 'ESPERANDO_DATOS_PROVINCIA') {
         
-        datosPedidoTemporal[from].texto += text + '\n';
+        datosPedidoTemporal[from].texto = (datosPedidoTemporal[from].texto || '') + text + '\n';
         
         if (verificarDatosCompletos(from)) {
             if (timersPedido[from]) clearTimeout(timersPedido[from]);
@@ -259,19 +259,20 @@ app.post('/webhook', async (req, res) => {
 
 // ===== FUNCIONES AUXILIARES =====
 
-// NUEVA FUNCIÓN para verificar si los datos del pedido están completos
+// FUNCIÓN MODIFICADA para verificar si los datos del pedido están completos
 function verificarDatosCompletos(senderId) {
     const datosAcumulados = datosPedidoTemporal[senderId]?.texto || '';
     const tipo = estadoUsuario[senderId];
+    const lineas = datosAcumulados.split('\n').filter(l => l.trim() !== '');
 
     if (tipo === 'ESPERANDO_DATOS_LIMA') {
         const tieneNombre = /[a-zA-Z]{3,}/.test(datosAcumulados);
-        const tieneDireccion = /(jirón|jr\.|avenida|av\.|calle|pasaje)/i.test(datosAcumulados);
-        return tieneNombre && tieneDireccion;
+        // Lógica mejorada: Asumimos que si hay al menos 2 líneas, tiene nombre y dirección/referencia
+        return tieneNombre && lineas.length >= 2;
     } else if (tipo === 'ESPERANDO_DATOS_PROVINCIA') {
         const tieneNombre = /[a-zA-Z]{3,}/.test(datosAcumulados);
         const tieneDNI = /\b\d{8}\b/.test(datosAcumulados);
-        const lineas = datosAcumulados.split('\n').filter(l => l.trim() !== '');
+        // Asumimos que si hay 3 líneas de información (nombre, DNI, agencia), está completo
         return tieneNombre && tieneDNI && lineas.length >= 3;
     }
     return false;
@@ -467,22 +468,11 @@ async function manejarFlujoCompra(senderId, mensaje) {
 
     const tipoPedido = estadoUsuario[senderId] === 'ESPERANDO_DATOS_LIMA' ? 'Lima' : 'Provincia';
     
-    const tieneDNI = /\b\d{8}\b/.test(mensaje);
-    const tieneDireccion = /(jirón|jr\.|avenida|av\.|calle|pasaje)/i.test(mensaje);
-
-    if (tipoPedido === 'Provincia' && !tieneDNI) {
-        await enviarMensajeTexto(senderId, "📌 No hemos podido identificar un DNI de 8 dígitos en sus datos. Por favor, envíelo para continuar.");
-        return;
-    }
-    if (tipoPedido === 'Lima' && !tieneDireccion) {
-        await enviarMensajeTexto(senderId, "📌 No hemos podido identificar una dirección en sus datos. Por favor, envíela para continuar.");
-        return;
-    }
-
     await enviarMensajeTexto(senderId, `✅ ¡Su orden para ${tipoPedido} ha sido confirmada!`);
     
     const lineas = mensaje.split('\n').map(line => line.trim()).filter(line => line);
-    const dni = tieneDNI ? mensaje.match(/\b(\d{8})\b/)[1] : null;
+    const dniMatch = mensaje.match(/\b(\d{8})\b/);
+    const dni = dniMatch ? dniMatch[1] : null;
     const nombre = lineas[0] || '';
     const lugar = lineas.slice(1).filter(l => l.trim() !== dni).join(', ') || lineas.slice(1).join(', ');
 
