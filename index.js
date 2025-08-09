@@ -209,7 +209,7 @@ app.post('/webhook', async (req, res) => {
       // PRIORIDAD 2: Detección de Intento de Compra (El "Interruptor")
       const contieneDNI = /\b\d{8}\b/.test(mensaje);
       const contieneDireccion = /(jirón|jr\.|avenida|av\.|calle|pasaje|mz|mza|lote|urb\.|urbanización)/i.test(mensaje);
-      if (pedidoActivo[from] && (contieneDNI || contieneDireccion)) {
+      if (pedidoActivo[from]?.ultimoProductoVisto && (contieneDNI || contieneDireccion)) {
           await manejarFlujoCompra(from, text);
           return res.sendStatus(200);
       }
@@ -368,7 +368,7 @@ async function enviarCatalogo(to, tipo) {
   }
 }
 
-// LÓGICA DE CHATGPT (CORREGIDA)
+// Lógica de ChatGPT
 async function enviarConsultaChatGPT(senderId, mensajeCliente, modo = 'normal') {
   try {
     if (!memoriaConversacion[senderId]) memoriaConversacion[senderId] = [];
@@ -392,7 +392,19 @@ async function enviarConsultaChatGPT(senderId, mensajeCliente, modo = 'normal') 
 
     const respuesta = response.choices[0].message.content.trim();
     memoriaConversacion[senderId].push({ role: 'assistant', content: respuesta });
-
+    
+    // ===== NUEVO INTÉRPRETE DE COMANDOS DE COMPRA =====
+    if (respuesta === 'INICIAR_COMPRA') {
+        const codigoUltimoVisto = pedidoActivo[senderId]?.ultimoProductoVisto;
+        if (codigoUltimoVisto) {
+            pedidoActivo[senderId].codigo = codigoUltimoVisto; // Confirmamos el producto
+            await enviarPreguntaUbicacion(senderId);
+        } else {
+            // Si por alguna razón no hay un último producto visto, le pedimos que lo especifique
+            await enviarConsultaChatGPT(senderId, "El cliente quiere comprar pero no sé qué modelo. Por favor, pregúntale amablemente qué modelo o código le gustaría pedir.");
+        }
+        return;
+    }
     if (respuesta === 'GENERAR_ORDEN') {
         const ultimoMensajeUsuario = memoriaConversacion[senderId].filter(m => m.role === 'user').slice(-1)[0].content;
         await manejarFlujoCompra(senderId, ultimoMensajeUsuario);
@@ -435,7 +447,7 @@ async function manejarFlujoCompra(senderId, mensaje) {
     }
 
     if (!pedidoActivo[senderId] || !pedidoActivo[senderId].codigo) {
-        await enviarConsultaChatGPT(senderId, `El cliente quiere comprar pero no sé qué modelo. Por favor, pregúntale amablemente qué modelo o código le gustaría pedir.`);
+        await enviarConsultaChatGPT(senderId, "El cliente quiere comprar pero no sé qué modelo. Por favor, pregúntale amablemente qué modelo o código le gustaría pedir.");
         return;
     }
 
@@ -454,9 +466,7 @@ async function manejarFlujoCompra(senderId, mensaje) {
         return;
     }
 
-    await enviarMensajeTexto(senderId, `✅ ¡Su orden para ${tipoPedido} ha sido confirmada! En breve le enviamos la orden. 😊`);
-
-    await new Promise(resolve => setTimeout(resolve, 5000));
+    await enviarMensajeTexto(senderId, `✅ ¡Su orden para ${tipoPedido} ha sido confirmada!`);
     
     const nombre = lineas[0] || '';
     const lugar = lineas.slice(1).filter(l => l.trim() !== dni).join(', ') || lineas.slice(1).join(', ');
@@ -464,9 +474,9 @@ async function manejarFlujoCompra(senderId, mensaje) {
     const datosExtraidos = { nombre, dni, lugar, tipo: tipoPedido };
     
     await generarYEnviarResumen(senderId, datosExtraidos);
+    await enviarInstruccionesDePago(senderId);
     
     delete estadoUsuario[senderId];
-    estadoUsuario[senderId] = 'ESPERANDO_CONFIRMACION_PAGO';
 }
 
 
@@ -502,8 +512,7 @@ async function generarYEnviarResumen(senderId, datos) {
             resumenTexto += `✅ *Dirección:* ${datos.lugar}\n`;
         }
 
-        resumenTexto += `✅ *Monto a Pagar:* ${montoFinal} soles\n\n`;
-        resumenTexto += `Por favor confirme si los datos están correctos para proceder con el envío. ✅`;
+        resumenTexto += `✅ *Monto a Pagar:* ${montoFinal} soles`;
 
         await axios.post(
           `https://graph.facebook.com/v18.0/${phoneNumberId}/messages`,
