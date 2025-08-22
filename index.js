@@ -1,19 +1,16 @@
 const express = require('express');
 const bodyParser = require('body-parser');
 const fs = require('fs');
-const axios = require('axios'); // Necesario para la API de ManyChat
+const axios = require('axios');
 require('dotenv').config();
 const OpenAI = require('openai');
 
-// --- CONFIGURACIÓN ---
-const MENSAJE_DE_ESPERA = "Un momento por favor... 💭"; // Puedes cambiar este mensaje
+const MENSAJE_DE_ESPERA = "Un momento por favor... 💭";
 
-// Carga de datos
 const data = require('./data.json');
 const promoData = require('./promoData.json');
 const systemPrompt = fs.readFileSync('./SystemPrompt.txt', 'utf-8');
 
-// Memoria y estados
 const memoriaConversacion = {};
 const estadoUsuario = {};
 let primerMensaje = {};
@@ -22,14 +19,11 @@ let pedidoActivo = {};
 const app = express();
 app.use(bodyParser.json());
 
-// Variables de Entorno
 const PORT = process.env.PORT || 3000;
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-const MANYCHAT_API_KEY = process.env.MANYCHAT_API_KEY; // Nueva variable
+const MANYCHAT_API_KEY = process.env.MANYCHAT_API_KEY;
 const client = new OpenAI({ apiKey: OPENAI_API_KEY });
 
-
-// ===== MANEJADOR PRINCIPAL DE MENSAJES (ASÍNCRONO) =====
 app.post('/webhook', async (req, res) => {
     console.log('📩 Webhook recibido:', JSON.stringify(req.body, null, 2));
 
@@ -39,7 +33,6 @@ app.post('/webhook', async (req, res) => {
 
     if (!from) return res.status(400).send('Falta ID de usuario.');
 
-    // Las interacciones que NO requieren IA se manejan de forma síncrona y rápida
     if (payload && payload.action) {
         const action = payload.action.toUpperCase();
         console.log(`🤖 Procesando PAYLOAD síncrono: ${action}`);
@@ -61,10 +54,8 @@ app.post('/webhook', async (req, res) => {
         }
     }
     
-    // Si la interacción es de texto o un botón que requiere IA, usamos el flujo asíncrono
     console.log(`⏳ Iniciando flujo asíncrono para texto: "${textFromUser}"`);
 
-    // 1. Enviamos una respuesta inmediata para cumplir el timeout de 10s
     res.json({
         version: "v2",
         content: {
@@ -72,12 +63,9 @@ app.post('/webhook', async (req, res) => {
         }
     });
 
-    // 2. Procesamos la consulta larga (ChatGPT) en segundo plano
     procesarConsultaConChatGPT(from, textFromUser);
 });
 
-
-// ===== NUEVA FUNCIÓN DE PROCESAMIENTO ASÍNCRONO =====
 async function procesarConsultaConChatGPT(senderId, mensajeCliente) {
     try {
         console.log(`🧠 Enviando a ChatGPT: "${mensajeCliente}"`);
@@ -91,7 +79,6 @@ async function procesarConsultaConChatGPT(senderId, mensajeCliente) {
         
         console.log(`🤖 Respuesta de ChatGPT: ${respuesta}`);
 
-        // Interceptamos los triggers de la IA
         if (respuesta.startsWith('MOSTRAR_MODELO:')) {
             const codigo = respuesta.split(':')[1].trim();
             const producto = Object.values(data).flat().find(p => p.codigo === codigo) || Object.values(promoData).find(p => p.codigo === codigo);
@@ -109,19 +96,16 @@ async function procesarConsultaConChatGPT(senderId, mensajeCliente) {
             return;
         }
         
-        // Si no es un trigger, enviamos la respuesta de texto
         await enviarMensajeProactivoManyChat(senderId, [{ type: 'text', text: respuesta }]);
-
     } catch (error) {
         console.error('❌ Error en consulta a ChatGPT:', error);
         await enviarMensajeProactivoManyChat(senderId, [{ type: 'text', text: '⚠️ Lo siento, hubo un problema con el asesor. Intente nuevamente.' }]);
     }
 }
 
-
-// ===== NUEVA FUNCIÓN PARA ENVIAR MENSAJES PROACTIVOS =====
 async function enviarMensajeProactivoManyChat(subscriberId, messages) {
-    const url = 'https://api.manychat.com/fb/sender';
+    // >>>>>>>>> ESTA ES LA LÍNEA CORREGIDA <<<<<<<<<<
+    const url = 'https://api.manychat.com/fb/sending/sendContent';
     const headers = {
         'Authorization': `Bearer ${MANYCHAT_API_KEY}`,
         'Content-Type': 'application/json'
@@ -137,17 +121,13 @@ async function enviarMensajeProactivoManyChat(subscriberId, messages) {
     };
 
     try {
-        console.log(`📤 Enviando mensaje proactivo a ${subscriberId}`);
+        console.log(`📤 Enviando mensaje proactivo a ${subscriberId} a la URL: ${url}`);
         await axios.post(url, body, { headers });
         console.log(`✅ Mensaje proactivo enviado con éxito.`);
     } catch (error) {
         console.error('❌ Error al enviar mensaje proactivo a ManyChat:', error.response ? error.response.data : error.message);
     }
 }
-
-
-// ===== FUNCIONES SÍNCRONAS (RESPUESTAS RÁPIDAS) =====
-// Estas funciones responden directamente al webhook y no usan la API proactiva.
 
 function responderAManyChat(res, messages = []) {
     const response = { version: "v2", content: { messages } };
@@ -178,10 +158,6 @@ async function enviarPreguntaUbicacion(res) {
     }];
     responderAManyChat(res, messages);
 }
-
-
-// ===== FUNCIONES "CONSTRUCTORAS" DE MENSAJES =====
-// Se han separado para poder ser usadas tanto por las respuestas síncronas como las proactivas.
 
 function construirMenuPrincipal() {
     return [{
@@ -242,13 +218,6 @@ function construirMensajeInfoPromo(producto) {
     }];
     return [{ type: 'cards', elements: elements, image_aspect_ratio: 'square' }];
 }
-
-// ... Resto de funciones auxiliares (timers, etc.) que no envían mensajes directamente ...
-function reiniciarTimerInactividad(senderId) {}
-function finalizarSesion(senderId, conservarMemoria = false) {}
-function verificarDatosCompletos(senderId) { return false; }
-async function manejarFlujoCompra(res, senderId, mensaje) {}
-
 
 app.listen(PORT, () => {
   console.log(`🚀 Servidor para ManyChat escuchando en http://0.0.0.0:${PORT}`);
