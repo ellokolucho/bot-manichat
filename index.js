@@ -28,7 +28,7 @@ const MANYCHAT_API_KEY = process.env.MANYCHAT_API_KEY;
 const client = new OpenAI({ apiKey: OPENAI_API_KEY });
 
 
-// ===== MANEJADOR PRINCIPAL DE MENSAJES =====
+// ===== MANEJADOR PRINCIPAL DE MENSAJES (CORREGIDO) =====
 app.post('/webhook', async (req, res) => {
     console.log('📩 Webhook recibido:', JSON.stringify(req.body, null, 2));
 
@@ -38,12 +38,22 @@ app.post('/webhook', async (req, res) => {
 
     if (!from) return res.status(400).send('Falta ID de usuario.');
 
-    // Las interacciones que NO requieren IA se manejan de forma síncrona y rápida
+    // --- CORRECCIÓN CLAVE: SEPARAMOS ACCIONES RÁPIDAS DE LENTAS ---
+    let esAccionRapida = false;
     if (payload && payload.action) {
+        const action = payload.action.toUpperCase();
+        const accionesRapidas = ['VER_MODELOS', 'CABALLEROS', 'DAMAS', 'CABALLEROS_AUTO', 'CABALLEROS_CUARZO', 'DAMAS_AUTO', 'DAMAS_CUARZO'];
+        if (accionesRapidas.includes(action)) {
+            esAccionRapida = true;
+        }
+    }
+
+    // Si es una acción rápida (no usa IA), respondemos de inmediato y terminamos.
+    if (esAccionRapida) {
         const action = payload.action.toUpperCase();
         console.log(`🤖 Procesando PAYLOAD síncrono: ${action}`);
         primerMensaje[from] = true;
-
+        
         switch (action) {
             case 'VER_MODELOS': return await enviarMenuPrincipal(res);
             case 'CABALLEROS': case 'DAMAS': return await enviarSubmenuTipoReloj(res, action);
@@ -51,29 +61,22 @@ app.post('/webhook', async (req, res) => {
             case 'CABALLEROS_CUARZO': return await enviarCatalogo(res, from, 'caballeros_cuarzo');
             case 'DAMAS_AUTO': return await enviarCatalogo(res, from, 'damas_automaticos');
             case 'DAMAS_CUARZO': return await enviarCatalogo(res, from, 'damas_cuarzo');
-            default:
-                // Si la acción no es conocida, la pasamos al flujo lento
-                break;
         }
+    } else {
+        // Si NO es una acción rápida, usamos el flujo asíncrono para evitar timeouts.
+        console.log(`⏳ Iniciando flujo asíncrono para: "${textFromUser || payload?.action}"`);
+        // 1. Enviamos una respuesta inmediata para cumplir el timeout de 10s
+        res.json({
+            version: "v2",
+            content: { messages: [{ type: "text", text: MENSAJE_DE_ESPERA }] }
+        });
+        // 2. Procesamos la consulta larga en segundo plano
+        procesarConsultaLarga(from, textFromUser, payload);
     }
-    
-    // Todas las interacciones de texto o las que pueden tardar, usan el flujo asíncrono
-    console.log(`⏳ Iniciando flujo asíncrono para: "${textFromUser || payload?.action}"`);
-
-    // 1. Enviamos una respuesta inmediata para cumplir el timeout de 10s
-    res.json({
-        version: "v2",
-        content: {
-            messages: [{ type: "text", text: MENSAJE_DE_ESPERA }]
-        }
-    });
-
-    // 2. Procesamos la consulta larga (ChatGPT) en segundo plano
-    procesarConsultaLarga(from, textFromUser, payload);
 });
 
 
-// ===== FUNCIÓN DE PROCESAMIENTO ASÍNCRONO =====
+// ===== FUNCIÓN DE PROCESAMIENTO ASÍNCRONO (CORREGIDA) =====
 async function procesarConsultaLarga(senderId, mensajeCliente, payload) {
     const input = payload?.action || mensajeCliente;
     try {
@@ -91,7 +94,11 @@ async function procesarConsultaLarga(senderId, mensajeCliente, payload) {
 
         if (respuesta.startsWith('MOSTRAR_MODELO:')) {
             const codigo = respuesta.split(':')[1].trim();
-            const producto = Object.values(data).flat().find(p => p.codigo === codigo) || Object.values(promoData).find(p => p.codigo === codigo);
+            console.log(`⚡ Trigger detectado: MOSTRAR_MODELO ${codigo}`);
+            // --- CORRECCIÓN CLAVE: Búsqueda flexible ---
+            const producto = Object.values(data).flat().find(p => p.codigo.toUpperCase().includes(codigo.toUpperCase())) || 
+                           Object.values(promoData).find(p => p.codigo.toUpperCase().includes(codigo.toUpperCase()));
+            
             messagesToSend = producto ? construirMensajeInfoPromo(producto) : [{ type: 'text', text: `😔 Lo siento, no pude encontrar el modelo con código ${codigo}.` }];
         } else if (respuesta === 'PEDIR_CATALOGO') {
             messagesToSend = construirMenuPrincipal();
@@ -113,26 +120,19 @@ async function procesarConsultaLarga(senderId, mensajeCliente, payload) {
 }
 
 
-// ===== FUNCIÓN PARA ENVIAR MENSAJES PROACTIVOS (CORREGIDA) =====
+// ===== FUNCIÓN PARA ENVIAR MENSAJES PROACTIVOS =====
 async function enviarMensajeProactivoManyChat(subscriberId, messages) {
     if (!MANYCHAT_API_KEY) {
-        console.error("### ERROR CRÍTICO: La variable de entorno MANYCHAT_API_KEY no está definida. ###");
+        console.error("### ERROR CRÍTICO: La variable MANYCHAT_API_KEY no está definida. ###");
         return;
     }
     const url = 'https://api.manychat.com/fb/sending/sendContent';
     const headers = { 'Authorization': `Bearer ${MANYCHAT_API_KEY}`, 'Content-Type': 'application/json' };
-    
-    // El cuerpo de la API proactiva es ligeramente diferente.
-    // No necesita 'external_message_callback'. La conversación se mantiene con la Default Reply.
     const body = {
         subscriber_id: subscriberId,
-        data: {
-            version: 'v2',
-            content: { messages }
-        },
-        message_tag: "POST_PURCHASE_UPDATE" // Etiqueta genérica para alta fiabilidad de entrega
+        data: { version: 'v2', content: { messages } },
+        message_tag: "POST_PURCHASE_UPDATE"
     };
-
     try {
         console.log(`📤 Enviando mensaje proactivo a ${subscriberId}`);
         await axios.post(url, body, { headers });
@@ -150,7 +150,6 @@ async function enviarMensajeProactivoManyChat(subscriberId, messages) {
 
 
 // ===== FUNCIONES SÍNCRONAS (RESPUESTAS RÁPIDAS) =====
-// Estas responden inmediatamente al webhook
 function responderAManyChat(res, messages = []) {
     const response = { version: "v2", content: { messages } };
     res.json(response);
