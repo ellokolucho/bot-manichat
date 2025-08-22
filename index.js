@@ -70,7 +70,7 @@ app.post('/webhook', async (req, res) => {
     if (payload && payload.action) {
         const action = payload.action.toUpperCase();
         console.log(`🤖 Procesando PAYLOAD de botón: ${action}`);
-        primerMensaje[from] = true; // Un clic cuenta como interacción
+        primerMensaje[from] = true; 
 
         if (action.startsWith('COMPRAR_PRODUCTO_')) {
             const codigoProducto = payload.action.replace('COMPRAR_PRODUCTO_', '');
@@ -116,7 +116,6 @@ app.post('/webhook', async (req, res) => {
         return;
     }
     
-    // Si no hay texto ni payload (ej. primer contacto), enviar menú
     if (!primerMensaje[from]) {
         primerMensaje[from] = true;
         await enviarMenuPrincipal(res);
@@ -278,24 +277,11 @@ async function enviarMensajeConBotonSalir(res, text) {
     responderAManyChat(res, messages);
 }
 
-// ... Resto de funciones auxiliares (timers, verificación, etc.) ...
-// La funcionalidad de estas funciones se mantiene, pero los mensajes proactivos no son posibles
-// con la API de Dynamic Content, por lo que se enfocan en la gestión del estado.
+// ... Resto de funciones auxiliares ...
 function reiniciarTimerInactividad(senderId) {}
 function finalizarSesion(senderId, conservarMemoria = false) {}
-function verificarDatosCompletos(senderId) {
-    const datosAcumulados = datosPedidoTemporal[senderId]?.texto || '';
-    const tipo = estadoUsuario[senderId];
-    const lineas = datosAcumulados.split('\n').filter(l => l.trim() !== '');
-    if (tipo === 'ESPERANDO_DATOS_LIMA') return /[a-zA-Z]{3,}/.test(datosAcumulados) && lineas.length >= 2;
-    if (tipo === 'ESPERANDO_DATOS_PROVINCIA') return /[a-zA-Z]{3,}/.test(datosAcumulados) && /\b\d{8}\b/.test(datosAcumulados) && lineas.length >= 3;
-    return false;
-}
-async function manejarFlujoCompra(res, senderId, mensaje) {
-    // Esta función fue restaurada en la versión completa anterior.
-    // Su lógica se mantiene para procesar los datos del pedido y generar el resumen.
-}
-
+function verificarDatosCompletos(senderId) { return false; }
+async function manejarFlujoCompra(res, senderId, mensaje) {}
 
 app.listen(PORT, () => {
   console.log(`🚀 Servidor para ManyChat escuchando en http://0.0.0.0:${PORT}`);
