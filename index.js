@@ -5,12 +5,12 @@ const axios = require('axios');
 require('dotenv').config();
 const OpenAI = require('openai');
 
-// Carga de datos
+const MENSAJE_DE_ESPERA = "Un momento por favor... 💭";
+
 const data = require('./data.json');
 const promoData = require('./promoData.json');
 const systemPrompt = fs.readFileSync('./SystemPrompt.txt', 'utf-8');
 
-// Memoria y estados (conservados de tu bot de Messenger)
 const memoriaConversacion = {};
 const estadoUsuario = {};
 let primerMensaje = {};
@@ -20,15 +20,13 @@ let pedidoActivo = {};
 const app = express();
 app.use(bodyParser.json());
 
-// Variables de Entorno
 const PORT = process.env.PORT || 3000;
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const MANYCHAT_API_KEY = process.env.MANYCHAT_API_KEY;
 const client = new OpenAI({ apiKey: OPENAI_API_KEY });
 
-
-// ===== MANEJADOR PRINCIPAL DE MENSAJES =====
 app.post('/webhook', async (req, res) => {
+    console.log('--- NUEVA SOLICITUD ---');
     console.log('📩 Webhook recibido:', JSON.stringify(req.body, null, 2));
 
     const from = req.body.id;
@@ -36,89 +34,43 @@ app.post('/webhook', async (req, res) => {
     const payload = req.body.payload || null;
 
     if (!from) return res.status(400).send('Falta ID de usuario.');
-    
+
     reiniciarTimerInactividad(from);
 
-    // --- PRIORIDAD 1: Clics en Botones (Payload) ---
-    // Esto reemplaza la lógica de 'postback' y 'quick_reply' de tu bot de Messenger
     if (payload && payload.action) {
         const action = payload.action.toUpperCase();
-        console.log(`🤖 Procesando PAYLOAD de botón: ${action}`);
-        primerMensaje[from] = true;
-
-        if (action.startsWith('COMPRAR_')) {
-            const codigo = action.split('_')[1];
-            pedidoActivo[from] = { codigo };
-            return await enviarPreguntaUbicacion(res);
-        }
+        console.log(`🤖 Decodificando PAYLOAD de botón: ${action}`);
         
-        switch (action) {
-            case 'CABALLEROS': return await enviarSubmenuTipoReloj(res, 'CABALLEROS');
-            case 'DAMAS': return await enviarSubmenuTipoReloj(res, 'DAMAS');
-            case 'ASESOR':
-                estadoUsuario[from] = 'ASESOR';
-                memoriaConversacion[from] = [];
-                return await enviarMensajeConBotonSalir(res, "😊 ¡Claro que sí! Estamos listos para responder todas sus dudas y consultas. Por favor, escríbenos qué te gustaría saber ✍️");
-            case 'CABALLEROS_AUTO': return await enviarCatalogo(res, 'caballeros_automaticos');
-            case 'CABALLEROS_CUARZO': return await enviarCatalogo(res, 'caballeros_cuarzo');
-            case 'DAMAS_AUTO': return await enviarCatalogo(res, 'damas_automaticos');
-            case 'DAMAS_CUARZO': return await enviarCatalogo(res, 'damas_cuarzo');
-            case 'VER_MODELOS': return await enviarMenuPrincipal(res);
-            case 'SALIR_ASESOR':
-                delete estadoUsuario[from];
-                delete memoriaConversacion[from];
-                await enviarMensajeTexto(res, "🚪 Has salido del chat con asesor.");
-                return await enviarMenuPrincipal(res); // Envía una nueva respuesta para continuar
-            case 'UBICACION_LIMA':
-                estadoUsuario[from] = 'ESPERANDO_DATOS_LIMA';
-                return await enviarMensajeTexto(res, "😊 Claro que sí. Por favor, para enviar su pedido indíquenos los siguientes datos:\n\n✅ Nombre completo ✍️\n✅ Dirección exacta 📍\n✅ Una referencia de cómo llegar a su domicilio 🏠");
-            case 'UBICACION_PROVINCIA':
-                estadoUsuario[from] = 'ESPERANDO_DATOS_PROVINCIA';
-                return await enviarMensajeTexto(res, "😊 Claro que sí. Por favor, permítanos los siguientes datos para programar su pedido:\n\n✅ Nombre completo ✍️\n✅ DNI 🪪\n✅ Agencia Shalom que le queda más cerca 🚚");
-            default:
-                // Si el payload no es reconocido, pasamos a la IA
-                return await procesarConChatGPT(res, from, textFromUser, payload);
+        const accionesRapidas = ['VER_MODELOS', 'CABALLEROS', 'DAMAS', 'CABALLEROS_AUTO', 'CABALLEROS_CUARZO', 'DAMAS_AUTO', 'DAMAS_CUARZO'];
+        
+        if (accionesRapidas.includes(action)) {
+            console.log(`⚡️ Es una acción rápida. Respondiendo de forma síncrona.`);
+            switch (action) {
+                case 'VER_MODELOS': return await enviarMenuPrincipal(res);
+                case 'CABALLEROS': case 'DAMAS': return await enviarSubmenuTipoReloj(res, action);
+                case 'CABALLEROS_AUTO': return await enviarCatalogo(res, 'caballeros_automaticos');
+                case 'CABALLEROS_CUARZO': return await enviarCatalogo(res, 'caballeros_cuarzo');
+                case 'DAMAS_AUTO': return await enviarCatalogo(res, 'damas_automaticos');
+                case 'DAMAS_CUARZO': return await enviarCatalogo(res, 'damas_cuarzo');
+            }
         }
     }
     
-    // --- PRIORIDAD 2: Mensajes de texto ---
-    if (textFromUser) {
-        return await procesarConChatGPT(res, from, textFromUser, null);
-    }
-    
-    // Si no hay texto ni payload (ej. primer contacto), enviar menú principal
-    if (!primerMensaje[from]) {
-        primerMensaje[from] = true;
-        await enviarMenuPrincipal(res);
-    } else {
-        res.json({}); 
-    }
-});
-
-
-// ===== FUNCIÓN UNIFICADA DE PROCESAMIENTO DE TEXTO Y AI =====
-async function procesarConChatGPT(res, senderId, mensajeCliente, payload) {
-    // Si el usuario está en un estado específico (ej. pidiendo datos), no usamos la IA
-    if (estadoUsuario[senderId]) {
-         // Lógica para manejar estados como 'ESPERANDO_DATOS_LIMA', etc.
-         // Se puede expandir aquí si es necesario, por ahora lo maneja la IA.
-    }
-
-    // Usamos el flujo asíncrono para todas las consultas a la IA para evitar timeouts
-    const MENSAJE_DE_ESPERA = "Un momento por favor... 💭";
+    console.log(`⏳ Iniciando flujo asíncrono para: "${textFromUser || payload?.action}"`);
     res.json({
         version: "v2",
         content: { messages: [{ type: "text", text: MENSAJE_DE_ESPERA }] }
     });
+    procesarConsultaLarga(from, textFromUser, payload);
+});
 
+async function procesarConsultaLarga(senderId, mensajeCliente, payload) {
+    const input = payload?.action || mensajeCliente;
     try {
-        const input = payload?.action || mensajeCliente;
         console.log(`🧠 Enviando a ChatGPT: "${input}"`);
-
         if (!memoriaConversacion[senderId]) memoriaConversacion[senderId] = [];
         memoriaConversacion[senderId].push({ role: 'user', content: input });
         const contexto = [{ role: 'system', content: systemPrompt }, ...memoriaConversacion[senderId]];
-
         const response = await client.chat.completions.create({ model: 'gpt-4o', messages: contexto });
         const respuesta = response.choices[0].message.content.trim();
         memoriaConversacion[senderId].push({ role: 'assistant', content: respuesta });
@@ -150,8 +102,6 @@ async function procesarConChatGPT(res, senderId, mensajeCliente, payload) {
     }
 }
 
-
-// ===== FUNCIÓN PARA ENVIAR MENSAJES PROACTIVOS (NECESARIA PARA IA Y TIMERS) =====
 async function enviarMensajeProactivoManyChat(subscriberId, messages) {
     if (!MANYCHAT_API_KEY) return console.error("### ERROR CRÍTICO: MANYCHAT_API_KEY no definida. ###");
     
@@ -162,13 +112,12 @@ async function enviarMensajeProactivoManyChat(subscriberId, messages) {
         data: { version: 'v2', content: { messages } },
         message_tag: "POST_PURCHASE_UPDATE"
     };
-
     try {
-        console.log(`📤 Enviando mensaje proactivo a ${subscriberId}`);
+        console.log(`📤 Enviando mensaje proactivo a ${subscriberId} con contenido:`, JSON.stringify(messages, null, 2));
         await axios.post(url, body, { headers });
         console.log(`✅ Mensaje proactivo enviado con éxito.`);
     } catch (error) {
-        console.error("### ERROR AL ENVIAR MENSAJE PROACTIVO ###");
+        console.error("### ERROR CRÍTICO AL ENVIAR MENSAJE PROACTIVO ###");
         if (error.response) {
             console.error("Status:", error.response.status);
             console.error("Data:", JSON.stringify(error.response.data, null, 2));
@@ -178,12 +127,13 @@ async function enviarMensajeProactivoManyChat(subscriberId, messages) {
     }
 }
 
-
-// ===== FUNCIONES SÍNCRONAS (RESPUESTAS RÁPIDAS) =====
 function responderAManyChat(res, messages = []) {
-    res.json({ version: "v2", content: { messages } });
+    const response = { version: "v2", content: { messages } };
+    console.log("📢 Respondiendo síncronamente a ManyChat con contenido:", JSON.stringify(messages, null, 2));
+    res.json(response);
 }
 
+// Las funciones síncronas solo construyen y responden.
 async function enviarMenuPrincipal(res) {
     responderAManyChat(res, construirMenuPrincipal());
 }
@@ -193,21 +143,12 @@ async function enviarSubmenuTipoReloj(res, genero) {
 async function enviarCatalogo(res, tipo) {
     responderAManyChat(res, construirCatalogo(tipo));
 }
-async function enviarPreguntaUbicacion(res) {
-     responderAManyChat(res, construirPreguntaUbicacion());
-}
-async function enviarMensajeTexto(res, texto) {
-    responderAManyChat(res, [{type: 'text', text: texto}]);
-}
-async function enviarMensajeConBotonSalir(res, texto) {
-    responderAManyChat(res, construirMensajeConBotonSalir(texto));
-}
 
-
-// ===== FUNCIONES "CONSTRUCTORAS" DE MENSAJES (TRADUCIDAS DE TU BOT) =====
+// ===== FUNCIONES "CONSTRUCTORAS" DE MENSAJES (SIMPLIFICADAS) =====
 function construirMenuPrincipal() {
     return [{
-        type: 'text', text: '👋 ¡Hola! Bienvenido a Tiendas Megan\n💎 Descubra su reloj ideal o el regalo perfecto 🎁\nElige una opción para ayudarte 👇',
+        type: 'text',
+        text: '👋 ¡Hola! Bienvenido a Tiendas Megan\n💎 Descubra su reloj ideal o el regalo perfecto 🎁',
         buttons: [
             { type: 'dynamic_block_callback', caption: '⌚ Para Caballeros', url: process.env.RAILWAY_APP_URL + '/webhook', payload: { action: 'CABALLEROS' }},
             { type: 'dynamic_block_callback', caption: '🕒 Para Damas', url: process.env.RAILWAY_APP_URL + '/webhook', payload: { action: 'DAMAS' }},
@@ -217,14 +158,14 @@ function construirMenuPrincipal() {
 }
 
 function construirSubmenuTipoReloj(genero) {
-    const texto = genero === "CABALLEROS" 
-        ? "🔥 ¡Excelente elección! ¿Qué tipo de reloj para caballeros le interesa?"
-        : "🔥 ¡Excelente elección! ¿Qué tipo de reloj para damas le interesa?";
+    const label = genero === "CABALLEROS" ? "caballeros" : "damas";
     const payloadAuto = genero === "CABALLEROS" ? "CABALLEROS_AUTO" : "DAMAS_AUTO";
     const payloadCuarzo = genero === "CABALLEROS" ? "CABALLEROS_CUARZO" : "DAMAS_CUARZO";
     
+    // Devolvemos un solo mensaje con los dos botones. Esta es la estructura más simple posible.
     return [{
-        type: 'text', text: texto,
+        type: 'text',
+        text: `🔥 ¡Excelente elección! ¿Qué tipo de reloj para ${label} le interesa?`,
         buttons: [
             { type: 'dynamic_block_callback', caption: '⌚ Automáticos ⚙️', url: process.env.RAILWAY_APP_URL + '/webhook', payload: { action: payloadAuto }},
             { type: 'dynamic_block_callback', caption: '🕑 De cuarzo ✨', url: process.env.RAILWAY_APP_URL + '/webhook', payload: { action: payloadCuarzo }}
@@ -238,54 +179,31 @@ function construirCatalogo(tipo) {
     
     const elements = productos.map(p => ({
         title: p.nombre, subtitle: `${p.descripcion}\n💰 Precio: S/${p.precio}`, image_url: p.imagen,
-        buttons: [
-            { type: 'dynamic_block_callback', caption: '🛍️ Comprar ahora', url: process.env.RAILWAY_APP_URL + '/webhook', payload: { action: `COMPRAR_${p.codigo}` }},
-            { type: 'web_url', caption: '📞 Comprar por WhatsApp', url: "https://wa.me/51904805167?text=Hola%20quiero%20comprar%20este%20modelo" },
-            { type: 'dynamic_block_callback', caption: '📖 Ver otros modelos', url: process.env.RAILWAY_APP_URL + '/webhook', payload: { action: 'VER_MODELOS' }}
-        ]
+        buttons: [{ type: 'dynamic_block_callback', caption: '🛍️ Comprar ahora', url: process.env.RAILWAY_APP_URL + '/webhook', payload: { action: `COMPRAR_${p.codigo}` }}]
     }));
     return [{ type: 'cards', elements: elements, image_aspect_ratio: 'square' }];
 }
 
 function construirMensajeInfoPromo(producto) {
     if (!producto) return [{ type: 'text', text: '⚠️ No se pudo encontrar la promo.' }];
-    
     return [{
         type: 'cards', elements: [{
             title: producto.nombre, subtitle: `${producto.descripcion}\n💰 Precio: S/${producto.precio}`, image_url: producto.imagen,
             buttons: [
                 { type: 'dynamic_block_callback', caption: '🛍️ Comprar ahora', url: process.env.RAILWAY_APP_URL + '/webhook', payload: { action: `COMPRAR_${producto.codigo}` }},
-                { type: 'web_url', caption: '📞 Comprar por WhatsApp', url: "https://wa.me/51904805167?text=Hola%20quiero%20comprar%20este%20modelo" },
                 { type: 'dynamic_block_callback', caption: '📖 Ver otros modelos', url: process.env.RAILWAY_APP_URL + '/webhook', payload: { action: 'VER_MODELOS' }}
             ]
         }], image_aspect_ratio: 'square'
     }];
 }
 
-function construirPreguntaUbicacion() {
-    return [{
-        type: 'text', text: "😊 Por favor indíquenos, ¿su pedido es para Lima o para Provincia?",
-        buttons: [
-            { type: 'dynamic_block_callback', caption: '🏙 Lima', url: process.env.RAILWAY_APP_URL + '/webhook', payload: { action: 'UBICACION_LIMA' }},
-            { type: 'dynamic_block_callback', caption: '🏞 Provincia', url: process.env.RAILWAY_APP_URL + '/webhook', payload: { action: 'UBICACION_PROVINCIA' }}
-        ]
-    }];
-}
-
-function construirMensajeConBotonSalir(texto) {
-     return [{
-        type: 'text', text: texto,
-        buttons: [{ type: 'dynamic_block_callback', caption: '↩️ Volver al inicio', url: process.env.RAILWAY_APP_URL + '/webhook', payload: { action: 'SALIR_ASESOR' }}]
-    }];
-}
-
-
 // ===== LÓGICA DE ESTADO Y TIMERS (RESTAURADA Y ADAPTADA) =====
+let timersInactividad = {};
 
 function reiniciarTimerInactividad(senderId) {
     limpiarTimers(senderId);
-    const timer10 = setTimeout(() => enviarAvisoInactividad(senderId), 10 * 60 * 1000); // 10 min
-    const timer12 = setTimeout(() => finalizarSesion(senderId), 12 * 60 * 1000); // 12 min
+    const timer10 = setTimeout(() => enviarAvisoInactividad(senderId), 10 * 60 * 1000);
+    const timer12 = setTimeout(() => finalizarSesion(senderId), 12 * 60 * 1000);
     timersInactividad[senderId] = { timer10, timer12 };
 }
 
@@ -298,16 +216,23 @@ function limpiarTimers(senderId) {
 }
 
 async function enviarAvisoInactividad(senderId) {
-    const messages = [{
-        type: 'text', text: '¿Podemos ayudarte en algo más? 😊 También puedes continuar tu pedido por WhatsApp:',
-        buttons: [{ type: 'web_url', caption: '📞 Continuar por WhatsApp', url: "https://wa.me/51904805167" }]
-    }];
+    console.log(`⏳ Enviando aviso de inactividad a ${senderId}`);
+    // Simplificado para máxima compatibilidad: enviamos dos mensajes separados.
+    const messages = [
+        { type: 'text', text: '¿Podemos ayudarte en algo más? 😊 También puedes continuar tu pedido por WhatsApp:' },
+        { 
+            type: 'text', 
+            text: 'Click aquí para ir a WhatsApp',
+            buttons: [{ type: 'web_url', caption: '📞 Continuar por WhatsApp', url: "https://wa.me/51904805167" }]
+        }
+    ];
     await enviarMensajeProactivoManyChat(senderId, messages);
 }
 
 async function finalizarSesion(senderId) {
-    delete estadoUsuario[senderId];
+    console.log(`⌛ Finalizando sesión por inactividad para ${senderId}`);
     delete memoriaConversacion[senderId];
+    delete primerMensaje[senderId];
     limpiarTimers(senderId);
     await enviarMensajeProactivoManyChat(senderId, [{type: 'text', text: "⏳ Tu sesión ha terminado. ¡Gracias por visitar Tiendas Megan!"}]);
 }
