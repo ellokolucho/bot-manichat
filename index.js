@@ -5,17 +5,16 @@ const axios = require('axios');
 require('dotenv').config();
 const OpenAI = require('openai');
 
-// --- CONFIGURACIÓN ---
-const MENSAJE_DE_ESPERA = "Un momento por favor... 💭";
-
 // Carga de datos
 const data = require('./data.json');
 const promoData = require('./promoData.json');
 const systemPrompt = fs.readFileSync('./SystemPrompt.txt', 'utf-8');
 
-// Memoria y estados
+// Memoria y estados (conservados de tu bot de Messenger)
 const memoriaConversacion = {};
+const estadoUsuario = {};
 let primerMensaje = {};
+let timersInactividad = {};
 let pedidoActivo = {};
 
 const app = express();
@@ -37,49 +36,89 @@ app.post('/webhook', async (req, res) => {
     const payload = req.body.payload || null;
 
     if (!from) return res.status(400).send('Falta ID de usuario.');
+    
+    reiniciarTimerInactividad(from);
 
-    // Las acciones de botones que no usan IA se manejan de forma síncrona y rápida
+    // --- PRIORIDAD 1: Clics en Botones (Payload) ---
+    // Esto reemplaza la lógica de 'postback' y 'quick_reply' de tu bot de Messenger
     if (payload && payload.action) {
         const action = payload.action.toUpperCase();
-        const accionesRapidas = ['VER_MODELOS', 'CABALLEROS', 'DAMAS', 'CABALLEROS_AUTO', 'CABALLEROS_CUARZO', 'DAMAS_AUTO', 'DAMAS_CUARZO'];
+        console.log(`🤖 Procesando PAYLOAD de botón: ${action}`);
+        primerMensaje[from] = true;
+
+        if (action.startsWith('COMPRAR_')) {
+            const codigo = action.split('_')[1];
+            pedidoActivo[from] = { codigo };
+            return await enviarPreguntaUbicacion(res);
+        }
         
-        if (accionesRapidas.includes(action)) {
-            console.log(`🤖 Procesando PAYLOAD síncrono: ${action}`);
-            switch (action) {
-                case 'VER_MODELOS': return await enviarMenuPrincipal(res);
-                case 'CABALLEROS': case 'DAMAS': return await enviarSubmenuTipoReloj(res, action);
-                case 'CABALLEROS_AUTO': return await enviarCatalogo(res, from, 'caballeros_automaticos');
-                case 'CABALLEROS_CUARZO': return await enviarCatalogo(res, from, 'caballeros_cuarzo');
-                case 'DAMAS_AUTO': return await enviarCatalogo(res, from, 'damas_automaticos');
-                case 'DAMAS_CUARZO': return await enviarCatalogo(res, from, 'damas_cuarzo');
-            }
+        switch (action) {
+            case 'CABALLEROS': return await enviarSubmenuTipoReloj(res, 'CABALLEROS');
+            case 'DAMAS': return await enviarSubmenuTipoReloj(res, 'DAMAS');
+            case 'ASESOR':
+                estadoUsuario[from] = 'ASESOR';
+                memoriaConversacion[from] = [];
+                return await enviarMensajeConBotonSalir(res, "😊 ¡Claro que sí! Estamos listos para responder todas sus dudas y consultas. Por favor, escríbenos qué te gustaría saber ✍️");
+            case 'CABALLEROS_AUTO': return await enviarCatalogo(res, 'caballeros_automaticos');
+            case 'CABALLEROS_CUARZO': return await enviarCatalogo(res, 'caballeros_cuarzo');
+            case 'DAMAS_AUTO': return await enviarCatalogo(res, 'damas_automaticos');
+            case 'DAMAS_CUARZO': return await enviarCatalogo(res, 'damas_cuarzo');
+            case 'VER_MODELOS': return await enviarMenuPrincipal(res);
+            case 'SALIR_ASESOR':
+                delete estadoUsuario[from];
+                delete memoriaConversacion[from];
+                await enviarMensajeTexto(res, "🚪 Has salido del chat con asesor.");
+                return await enviarMenuPrincipal(res); // Envía una nueva respuesta para continuar
+            case 'UBICACION_LIMA':
+                estadoUsuario[from] = 'ESPERANDO_DATOS_LIMA';
+                return await enviarMensajeTexto(res, "😊 Claro que sí. Por favor, para enviar su pedido indíquenos los siguientes datos:\n\n✅ Nombre completo ✍️\n✅ Dirección exacta 📍\n✅ Una referencia de cómo llegar a su domicilio 🏠");
+            case 'UBICACION_PROVINCIA':
+                estadoUsuario[from] = 'ESPERANDO_DATOS_PROVINCIA';
+                return await enviarMensajeTexto(res, "😊 Claro que sí. Por favor, permítanos los siguientes datos para programar su pedido:\n\n✅ Nombre completo ✍️\n✅ DNI 🪪\n✅ Agencia Shalom que le queda más cerca 🚚");
+            default:
+                // Si el payload no es reconocido, pasamos a la IA
+                return await procesarConChatGPT(res, from, textFromUser, payload);
         }
     }
     
-    // Todas las demás interacciones (texto o botones que usan IA) usan el flujo asíncrono
-    console.log(`⏳ Iniciando flujo asíncrono para: "${textFromUser || payload?.action}"`);
+    // --- PRIORIDAD 2: Mensajes de texto ---
+    if (textFromUser) {
+        return await procesarConChatGPT(res, from, textFromUser, null);
+    }
     
-    // 1. Enviamos respuesta inmediata para evitar el timeout
+    // Si no hay texto ni payload (ej. primer contacto), enviar menú principal
+    if (!primerMensaje[from]) {
+        primerMensaje[from] = true;
+        await enviarMenuPrincipal(res);
+    } else {
+        res.json({}); 
+    }
+});
+
+
+// ===== FUNCIÓN UNIFICADA DE PROCESAMIENTO DE TEXTO Y AI =====
+async function procesarConChatGPT(res, senderId, mensajeCliente, payload) {
+    // Si el usuario está en un estado específico (ej. pidiendo datos), no usamos la IA
+    if (estadoUsuario[senderId]) {
+         // Lógica para manejar estados como 'ESPERANDO_DATOS_LIMA', etc.
+         // Se puede expandir aquí si es necesario, por ahora lo maneja la IA.
+    }
+
+    // Usamos el flujo asíncrono para todas las consultas a la IA para evitar timeouts
+    const MENSAJE_DE_ESPERA = "Un momento por favor... 💭";
     res.json({
         version: "v2",
         content: { messages: [{ type: "text", text: MENSAJE_DE_ESPERA }] }
     });
 
-    // 2. Procesamos la consulta larga en segundo plano
-    procesarConsultaLarga(from, textFromUser, payload);
-});
-
-
-// ===== FUNCIÓN DE PROCESAMIENTO ASÍNCRONO =====
-async function procesarConsultaLarga(senderId, mensajeCliente, payload) {
-    // Si la acción vino de un botón, usamos esa acción. Si no, el texto.
-    const input = payload?.action || mensajeCliente;
     try {
+        const input = payload?.action || mensajeCliente;
         console.log(`🧠 Enviando a ChatGPT: "${input}"`);
+
         if (!memoriaConversacion[senderId]) memoriaConversacion[senderId] = [];
         memoriaConversacion[senderId].push({ role: 'user', content: input });
-
         const contexto = [{ role: 'system', content: systemPrompt }, ...memoriaConversacion[senderId]];
+
         const response = await client.chat.completions.create({ model: 'gpt-4o', messages: contexto });
         const respuesta = response.choices[0].message.content.trim();
         memoriaConversacion[senderId].push({ role: 'assistant', content: respuesta });
@@ -90,7 +129,7 @@ async function procesarConsultaLarga(senderId, mensajeCliente, payload) {
         if (respuesta.startsWith('MOSTRAR_MODELO:')) {
             const codigo = respuesta.split(':')[1].trim();
             const producto = Object.values(data).flat().find(p => p.codigo.toUpperCase().includes(codigo.toUpperCase())) || 
-                           Object.values(promoData).find(p => p.codigo.toUpperCase().includes(codigo.toUpperCase()));
+                           Object.values(promoData).find(p => p.nombre.toUpperCase().includes(codigo.toUpperCase()));
             messagesToSend = producto ? construirMensajeInfoPromo(producto) : [{ type: 'text', text: `😔 Lo siento, no pude encontrar el modelo con código ${codigo}.` }];
         } else if (respuesta === 'PEDIR_CATALOGO') {
             messagesToSend = construirMenuPrincipal();
@@ -99,7 +138,7 @@ async function procesarConsultaLarga(senderId, mensajeCliente, payload) {
             messagesToSend = construirSubmenuTipoReloj(genero);
         } else if (respuesta.startsWith('MOSTRAR_CATALOGO:')) {
             const tipo = respuesta.split(':')[1].trim();
-            messagesToSend = construirCatalogo(senderId, tipo);
+            messagesToSend = construirCatalogo(tipo);
         } else {
             messagesToSend = [{ type: 'text', text: respuesta }];
         }
@@ -112,12 +151,10 @@ async function procesarConsultaLarga(senderId, mensajeCliente, payload) {
 }
 
 
-// ===== FUNCIÓN PARA ENVIAR MENSAJES PROACTIVOS =====
+// ===== FUNCIÓN PARA ENVIAR MENSAJES PROACTIVOS (NECESARIA PARA IA Y TIMERS) =====
 async function enviarMensajeProactivoManyChat(subscriberId, messages) {
-    if (!MANYCHAT_API_KEY) {
-        console.error("### ERROR CRÍTICO: MANYCHAT_API_KEY no está definida. ###");
-        return;
-    }
+    if (!MANYCHAT_API_KEY) return console.error("### ERROR CRÍTICO: MANYCHAT_API_KEY no definida. ###");
+    
     const url = 'https://api.manychat.com/fb/sending/sendContent';
     const headers = { 'Authorization': `Bearer ${MANYCHAT_API_KEY}`, 'Content-Type': 'application/json' };
     const body = {
@@ -125,12 +162,13 @@ async function enviarMensajeProactivoManyChat(subscriberId, messages) {
         data: { version: 'v2', content: { messages } },
         message_tag: "POST_PURCHASE_UPDATE"
     };
+
     try {
         console.log(`📤 Enviando mensaje proactivo a ${subscriberId}`);
         await axios.post(url, body, { headers });
         console.log(`✅ Mensaje proactivo enviado con éxito.`);
     } catch (error) {
-        console.error("### ERROR CRÍTICO AL ENVIAR MENSAJE PROACTIVO ###");
+        console.error("### ERROR AL ENVIAR MENSAJE PROACTIVO ###");
         if (error.response) {
             console.error("Status:", error.response.status);
             console.error("Data:", JSON.stringify(error.response.data, null, 2));
@@ -143,8 +181,7 @@ async function enviarMensajeProactivoManyChat(subscriberId, messages) {
 
 // ===== FUNCIONES SÍNCRONAS (RESPUESTAS RÁPIDAS) =====
 function responderAManyChat(res, messages = []) {
-    const response = { version: "v2", content: { messages } };
-    res.json(response);
+    res.json({ version: "v2", content: { messages } });
 }
 
 async function enviarMenuPrincipal(res) {
@@ -153,56 +190,128 @@ async function enviarMenuPrincipal(res) {
 async function enviarSubmenuTipoReloj(res, genero) {
     responderAManyChat(res, construirSubmenuTipoReloj(genero));
 }
-async function enviarCatalogo(res, to, tipo) {
-    responderAManyChat(res, construirCatalogo(to, tipo));
+async function enviarCatalogo(res, tipo) {
+    responderAManyChat(res, construirCatalogo(tipo));
+}
+async function enviarPreguntaUbicacion(res) {
+     responderAManyChat(res, construirPreguntaUbicacion());
+}
+async function enviarMensajeTexto(res, texto) {
+    responderAManyChat(res, [{type: 'text', text: texto}]);
+}
+async function enviarMensajeConBotonSalir(res, texto) {
+    responderAManyChat(res, construirMensajeConBotonSalir(texto));
 }
 
 
-// ===== FUNCIONES "CONSTRUCTORAS" DE MENSAJES (BASADAS EN TU LÓGICA) =====
+// ===== FUNCIONES "CONSTRUCTORAS" DE MENSAJES (TRADUCIDAS DE TU BOT) =====
 function construirMenuPrincipal() {
     return [{
-        type: 'text', text: '👋 ¡Hola! Bienvenido a Tiendas Megan\n💎 Descubra su reloj ideal o el regalo perfecto 🎁',
+        type: 'text', text: '👋 ¡Hola! Bienvenido a Tiendas Megan\n💎 Descubra su reloj ideal o el regalo perfecto 🎁\nElige una opción para ayudarte 👇',
         buttons: [
-            { type: 'dynamic_block_callback', caption: '🤵‍♂️ Para Caballeros', url: process.env.RAILWAY_APP_URL + '/webhook', payload: { action: 'CABALLEROS' }},
-            { type: 'dynamic_block_callback', caption: '💃 Para Damas', url: process.env.RAILWAY_APP_URL + '/webhook', payload: { action: 'DAMAS' }},
+            { type: 'dynamic_block_callback', caption: '⌚ Para Caballeros', url: process.env.RAILWAY_APP_URL + '/webhook', payload: { action: 'CABALLEROS' }},
+            { type: 'dynamic_block_callback', caption: '🕒 Para Damas', url: process.env.RAILWAY_APP_URL + '/webhook', payload: { action: 'DAMAS' }},
             { type: 'dynamic_block_callback', caption: '💬 Hablar con Asesor', url: process.env.RAILWAY_APP_URL + '/webhook', payload: { action: 'ASESOR' }}
         ]
     }];
 }
+
 function construirSubmenuTipoReloj(genero) {
-    const label = genero === 'CABALLEROS' ? 'caballeros' : 'damas';
+    const texto = genero === "CABALLEROS" 
+        ? "🔥 ¡Excelente elección! ¿Qué tipo de reloj para caballeros le interesa?"
+        : "🔥 ¡Excelente elección! ¿Qué tipo de reloj para damas le interesa?";
+    const payloadAuto = genero === "CABALLEROS" ? "CABALLEROS_AUTO" : "DAMAS_AUTO";
+    const payloadCuarzo = genero === "CABALLEROS" ? "CABALLEROS_CUARZO" : "DAMAS_CUARZO";
+    
     return [{
-        type: 'text', text: `✅ ¡Excelente elección! ¿Qué tipo de reloj para ${label} le gustaría ver?`,
+        type: 'text', text: texto,
         buttons: [
-            { type: 'dynamic_block_callback', caption: '⌚ Automáticos', url: process.env.RAILWAY_APP_URL + '/webhook', payload: { action: `${genero}_AUTO` }},
-            { type: 'dynamic_block_callback', caption: '⏱️ De cuarzo', url: process.env.RAILWAY_APP_URL + '/webhook', payload: { action: `${genero}_CUARZO` }}
+            { type: 'dynamic_block_callback', caption: '⌚ Automáticos ⚙️', url: process.env.RAILWAY_APP_URL + '/webhook', payload: { action: payloadAuto }},
+            { type: 'dynamic_block_callback', caption: '🕑 De cuarzo ✨', url: process.env.RAILWAY_APP_URL + '/webhook', payload: { action: payloadCuarzo }}
         ]
     }];
 }
-function construirCatalogo(to, tipo) {
+
+function construirCatalogo(tipo) {
     const productos = data[tipo];
-    if (!productos || !productos.length) return [{ type: 'text', text: '😔 Lo siento, no hay productos disponibles.' }];
+    if (!productos || !productos.length) return [{ type: 'text', text: '😔 No hay productos disponibles.' }];
+    
     const elements = productos.map(p => ({
-        title: p.nombre, subtitle: `${p.descripcion}\n💲 ${p.precio} soles`, image_url: p.imagen,
-        buttons: [{ type: 'dynamic_block_callback', caption: '🛍️ Pedir este modelo', url: process.env.RAILWAY_APP_URL + '/webhook', payload: { action: `COMPRAR_PRODUCTO_${p.codigo}` }}]
+        title: p.nombre, subtitle: `${p.descripcion}\n💰 Precio: S/${p.precio}`, image_url: p.imagen,
+        buttons: [
+            { type: 'dynamic_block_callback', caption: '🛍️ Comprar ahora', url: process.env.RAILWAY_APP_URL + '/webhook', payload: { action: `COMPRAR_${p.codigo}` }},
+            { type: 'web_url', caption: '📞 Comprar por WhatsApp', url: "https://wa.me/51904805167?text=Hola%20quiero%20comprar%20este%20modelo" },
+            { type: 'dynamic_block_callback', caption: '📖 Ver otros modelos', url: process.env.RAILWAY_APP_URL + '/webhook', payload: { action: 'VER_MODELOS' }}
+        ]
     }));
-    return [{ type: 'cards', elements: elements, image_aspect_ratio: 'square' }, {
-        type: 'text', text: '✨ ¿Le gustaría adquirir alguno o ver otras opciones?',
-        buttons: [{ type: 'dynamic_block_callback', caption: '📖 Volver al menú', url: process.env.RAILWAY_APP_URL + '/webhook', payload: { action: 'VER_MODELOS' }}]
-    }];
+    return [{ type: 'cards', elements: elements, image_aspect_ratio: 'square' }];
 }
+
 function construirMensajeInfoPromo(producto) {
     if (!producto) return [{ type: 'text', text: '⚠️ No se pudo encontrar la promo.' }];
+    
     return [{
         type: 'cards', elements: [{
-            title: producto.nombre, subtitle: `${producto.descripcion}\n💰 Precio: ${producto.precio}`, image_url: producto.imagen,
+            title: producto.nombre, subtitle: `${producto.descripcion}\n💰 Precio: S/${producto.precio}`, image_url: producto.imagen,
             buttons: [
-                { type: 'dynamic_block_callback', caption: '🛍️ Pedir este modelo', url: process.env.RAILWAY_APP_URL + '/webhook', payload: { action: `COMPRAR_PRODUCTO_${producto.codigo}` }},
+                { type: 'dynamic_block_callback', caption: '🛍️ Comprar ahora', url: process.env.RAILWAY_APP_URL + '/webhook', payload: { action: `COMPRAR_${producto.codigo}` }},
+                { type: 'web_url', caption: '📞 Comprar por WhatsApp', url: "https://wa.me/51904805167?text=Hola%20quiero%20comprar%20este%20modelo" },
                 { type: 'dynamic_block_callback', caption: '📖 Ver otros modelos', url: process.env.RAILWAY_APP_URL + '/webhook', payload: { action: 'VER_MODELOS' }}
             ]
         }], image_aspect_ratio: 'square'
     }];
 }
+
+function construirPreguntaUbicacion() {
+    return [{
+        type: 'text', text: "😊 Por favor indíquenos, ¿su pedido es para Lima o para Provincia?",
+        buttons: [
+            { type: 'dynamic_block_callback', caption: '🏙 Lima', url: process.env.RAILWAY_APP_URL + '/webhook', payload: { action: 'UBICACION_LIMA' }},
+            { type: 'dynamic_block_callback', caption: '🏞 Provincia', url: process.env.RAILWAY_APP_URL + '/webhook', payload: { action: 'UBICACION_PROVINCIA' }}
+        ]
+    }];
+}
+
+function construirMensajeConBotonSalir(texto) {
+     return [{
+        type: 'text', text: texto,
+        buttons: [{ type: 'dynamic_block_callback', caption: '↩️ Volver al inicio', url: process.env.RAILWAY_APP_URL + '/webhook', payload: { action: 'SALIR_ASESOR' }}]
+    }];
+}
+
+
+// ===== LÓGICA DE ESTADO Y TIMERS (RESTAURADA Y ADAPTADA) =====
+
+function reiniciarTimerInactividad(senderId) {
+    limpiarTimers(senderId);
+    const timer10 = setTimeout(() => enviarAvisoInactividad(senderId), 10 * 60 * 1000); // 10 min
+    const timer12 = setTimeout(() => finalizarSesion(senderId), 12 * 60 * 1000); // 12 min
+    timersInactividad[senderId] = { timer10, timer12 };
+}
+
+function limpiarTimers(senderId) {
+    if (timersInactividad[senderId]) {
+        clearTimeout(timersInactividad[senderId].timer10);
+        clearTimeout(timersInactividad[senderId].timer12);
+        delete timersInactividad[senderId];
+    }
+}
+
+async function enviarAvisoInactividad(senderId) {
+    const messages = [{
+        type: 'text', text: '¿Podemos ayudarte en algo más? 😊 También puedes continuar tu pedido por WhatsApp:',
+        buttons: [{ type: 'web_url', caption: '📞 Continuar por WhatsApp', url: "https://wa.me/51904805167" }]
+    }];
+    await enviarMensajeProactivoManyChat(senderId, messages);
+}
+
+async function finalizarSesion(senderId) {
+    delete estadoUsuario[senderId];
+    delete memoriaConversacion[senderId];
+    limpiarTimers(senderId);
+    await enviarMensajeProactivoManyChat(senderId, [{type: 'text', text: "⏳ Tu sesión ha terminado. ¡Gracias por visitar Tiendas Megan!"}]);
+}
+
 
 app.listen(PORT, () => {
   console.log(`🚀 Servidor para ManyChat escuchando en http://0.0.0.0:${PORT}`);
