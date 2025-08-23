@@ -5,26 +5,31 @@ const axios = require('axios');
 require('dotenv').config();
 const OpenAI = require('openai');
 
+// --- CONFIGURACIÓN ---
 const MENSAJE_DE_ESPERA = "Un momento por favor... 💭";
 
+// Carga de datos
 const data = require('./data.json');
 const promoData = require('./promoData.json');
 const systemPrompt = fs.readFileSync('./SystemPrompt.txt', 'utf-8');
 
+// Memoria y estados
 const memoriaConversacion = {};
 const estadoUsuario = {};
 let primerMensaje = {};
-let timersInactividad = {};
+let timersInactividad = {}; // << DECLARACIÓN ÚNICA Y CORRECTA
 let pedidoActivo = {};
 
 const app = express();
 app.use(bodyParser.json());
 
+// Variables de Entorno
 const PORT = process.env.PORT || 3000;
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const MANYCHAT_API_KEY = process.env.MANYCHAT_API_KEY;
 const client = new OpenAI({ apiKey: OPENAI_API_KEY });
 
+// ===== MANEJADOR PRINCIPAL DE MENSAJES =====
 app.post('/webhook', async (req, res) => {
     console.log('--- NUEVA SOLICITUD ---');
     console.log('📩 Webhook recibido:', JSON.stringify(req.body, null, 2));
@@ -133,7 +138,6 @@ function responderAManyChat(res, messages = []) {
     res.json(response);
 }
 
-// Las funciones síncronas solo construyen y responden.
 async function enviarMenuPrincipal(res) {
     responderAManyChat(res, construirMenuPrincipal());
 }
@@ -144,11 +148,9 @@ async function enviarCatalogo(res, tipo) {
     responderAManyChat(res, construirCatalogo(tipo));
 }
 
-// ===== FUNCIONES "CONSTRUCTORAS" DE MENSAJES (SIMPLIFICADAS) =====
 function construirMenuPrincipal() {
     return [{
-        type: 'text',
-        text: '👋 ¡Hola! Bienvenido a Tiendas Megan\n💎 Descubra su reloj ideal o el regalo perfecto 🎁',
+        type: 'text', text: '👋 ¡Hola! Bienvenido a Tiendas Megan\n💎 Descubra su reloj ideal o el regalo perfecto 🎁',
         buttons: [
             { type: 'dynamic_block_callback', caption: '⌚ Para Caballeros', url: process.env.RAILWAY_APP_URL + '/webhook', payload: { action: 'CABALLEROS' }},
             { type: 'dynamic_block_callback', caption: '🕒 Para Damas', url: process.env.RAILWAY_APP_URL + '/webhook', payload: { action: 'DAMAS' }},
@@ -156,34 +158,30 @@ function construirMenuPrincipal() {
         ]
     }];
 }
-
 function construirSubmenuTipoReloj(genero) {
     const label = genero === "CABALLEROS" ? "caballeros" : "damas";
     const payloadAuto = genero === "CABALLEROS" ? "CABALLEROS_AUTO" : "DAMAS_AUTO";
     const payloadCuarzo = genero === "CABALLEROS" ? "CABALLEROS_CUARZO" : "DAMAS_CUARZO";
-    
-    // Devolvemos un solo mensaje con los dos botones. Esta es la estructura más simple posible.
     return [{
-        type: 'text',
-        text: `🔥 ¡Excelente elección! ¿Qué tipo de reloj para ${label} le interesa?`,
+        type: 'text', text: `🔥 ¡Excelente elección! ¿Qué tipo de reloj para ${label} le interesa?`,
         buttons: [
             { type: 'dynamic_block_callback', caption: '⌚ Automáticos ⚙️', url: process.env.RAILWAY_APP_URL + '/webhook', payload: { action: payloadAuto }},
             { type: 'dynamic_block_callback', caption: '🕑 De cuarzo ✨', url: process.env.RAILWAY_APP_URL + '/webhook', payload: { action: payloadCuarzo }}
         ]
     }];
 }
-
 function construirCatalogo(tipo) {
     const productos = data[tipo];
     if (!productos || !productos.length) return [{ type: 'text', text: '😔 No hay productos disponibles.' }];
-    
     const elements = productos.map(p => ({
         title: p.nombre, subtitle: `${p.descripcion}\n💰 Precio: S/${p.precio}`, image_url: p.imagen,
         buttons: [{ type: 'dynamic_block_callback', caption: '🛍️ Comprar ahora', url: process.env.RAILWAY_APP_URL + '/webhook', payload: { action: `COMPRAR_${p.codigo}` }}]
     }));
-    return [{ type: 'cards', elements: elements, image_aspect_ratio: 'square' }];
+    return [{ type: 'cards', elements: elements, image_aspect_ratio: 'square' }, {
+        type: 'text', text: '✨ ¿Le gustaría adquirir alguno o ver otras opciones?',
+        buttons: [{ type: 'dynamic_block_callback', caption: '📖 Volver al menú', url: process.env.RAILWAY_APP_URL + '/webhook', payload: { action: 'VER_MODELOS' }}]
+    }];
 }
-
 function construirMensajeInfoPromo(producto) {
     if (!producto) return [{ type: 'text', text: '⚠️ No se pudo encontrar la promo.' }];
     return [{
@@ -198,7 +196,7 @@ function construirMensajeInfoPromo(producto) {
 }
 
 // ===== LÓGICA DE ESTADO Y TIMERS (RESTAURADA Y ADAPTADA) =====
-let timersInactividad = {};
+// SE ELIMINÓ LA DECLARACIÓN DUPLICADA DE timersInactividad DE AQUÍ
 
 function reiniciarTimerInactividad(senderId) {
     limpiarTimers(senderId);
@@ -217,7 +215,6 @@ function limpiarTimers(senderId) {
 
 async function enviarAvisoInactividad(senderId) {
     console.log(`⏳ Enviando aviso de inactividad a ${senderId}`);
-    // Simplificado para máxima compatibilidad: enviamos dos mensajes separados.
     const messages = [
         { type: 'text', text: '¿Podemos ayudarte en algo más? 😊 También puedes continuar tu pedido por WhatsApp:' },
         { 
@@ -236,7 +233,6 @@ async function finalizarSesion(senderId) {
     limpiarTimers(senderId);
     await enviarMensajeProactivoManyChat(senderId, [{type: 'text', text: "⏳ Tu sesión ha terminado. ¡Gracias por visitar Tiendas Megan!"}]);
 }
-
 
 app.listen(PORT, () => {
   console.log(`🚀 Servidor para ManyChat escuchando en http://0.0.0.0:${PORT}`);
